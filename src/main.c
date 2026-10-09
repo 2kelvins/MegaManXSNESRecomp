@@ -26,6 +26,7 @@
 #include "mmx_coop_view.h"
 #include "mmx_replay.h"
 #include "desktop/sdl_compat.h"
+#include "mmx_boss_rush.h"
 #include "netplay/snes_netplay.h"
 #include "host_paths.h"
 #include <ctype.h>
@@ -52,7 +53,7 @@ static void MmxPrepareFrame(int dw, int dh, int *w, int *h) {
   /* A room has one logical field. Window size and each peer's offline pixel
    * preference cannot widen it. The offline setting is never overwritten. */
   SnesDisplayAspect aspect = SnesDisplayAspect_Clamp(MmxNetplayActive() ? 0 : g_config.display_aspect);
-  g_mmx_custom_renderer = !MMX_VARIANT_JP && (g_config.widescreen || MmxZeroEnabled() || MmxWeaponsEnabled() || MmxKncBugfixActive(0) || MmxKncBugfixActive(1));
+  g_mmx_custom_renderer = !MMX_VARIANT_JP && (g_config.widescreen || MmxZeroEnabled() || MmxWeaponsEnabled() || MmxKncBugfixActive(0) || MmxKncBugfixActive(1) || MmxBossRushActive() || MmxBossRushGetState().menu);
   g_mmx_custom_view = MmxRendererViewport(g_mmx_custom_aspect, dw, dh,
       aspect);
   if (!g_config.widescreen) {
@@ -89,6 +90,7 @@ static void MmxBeforeFrame(void) {
     MmxZeroSetCollisionRom(g_snes->cart->rom, g_snes->cart->romSize);
     MmxWeaponsCollisionRom(g_snes->cart->rom, g_snes->cart->romSize);
     MmxCoopHostFrame();
+    MmxBossRushHostFrame();
   }
   MmxRendererHoldFrame(MmxCoopTransitionActive());
   if (g_mmx_custom_renderer) MmxRendererLatchSprites();
