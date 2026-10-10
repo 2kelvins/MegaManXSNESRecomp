@@ -19,6 +19,7 @@ static void frame(unsigned input) {
     MmxCoopViewsSetIndependent(true);MmxCoopViewsSetOnline(true);MmxRendererSetPeerView(1);
   }
   RtlRunFrame(input | (1u << 30));
+  MmxBossRushAudioPresent();
   CaptureSimulationFrame(1);
 }
 static void replay(int count) {
