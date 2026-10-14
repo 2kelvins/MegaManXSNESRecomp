@@ -303,11 +303,18 @@ bool MmxReplayBegin(uint32_t *inputs) {
     *inputs=playback_begin(*inputs);
     return !finished && !failed;
   }
+  /* Include segment rotation, snapshot serialization and synchronous writes.
+   * Unsigned subtraction also handles SDL2's millisecond counter wrapping. */
+  bool timed=snes_netplay_active();
+  uint32_t started=timed?(uint32_t)SDL_GetTicks():0;
   record_begin(*inputs);
+  if(timed) snes_netplay_note_slow_operation("replay_begin",(uint32_t)SDL_GetTicks()-started);
   return true; /* Optional recording failures never stop the player's game. */
 }
 void MmxReplayEnd(void) {
   if(!pending || failed || finished) return;
+  bool timed=!playing && snes_netplay_active();
+  uint32_t started=timed?(uint32_t)SDL_GetTicks():0;
   pending=false; uint32_t w,c,v,p; hashes(&w,&c,&v,&p);
   if(playing) {
     /* Execute even the last flushed input of a hung/crashed session. Reading
@@ -337,4 +344,5 @@ void MmxReplayEnd(void) {
     if(fprintf(stream,"H %u %08x %08x %08x %08x\n",(unsigned)snes_frame_counter,w,c,v,p)<0 || fflush(stream)) error("cannot write checkpoint");
     ++rows;
   }
+  if(timed) snes_netplay_note_slow_operation("replay_end",(uint32_t)SDL_GetTicks()-started);
 }

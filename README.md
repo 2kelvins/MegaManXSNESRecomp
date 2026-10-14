@@ -153,7 +153,13 @@ Windows diagnostics are saved beside the executable in
 If a crash produced `crash_report_*.json` or `crash_minidump_*.dmp`, include
 those too. Grab the reports before running the game again.
 
-For netplay connection problems, enable the **Tier 2 diagnostics** mod
+Netplay disconnect details and long application stalls are logged automatically
+in the session log. They distinguish a received peer goodbye from a timeout,
+report the age of the last peer packet, and identify long gaps in network
+processing or slow replay recording. Collect the session logs from both players
+when a match disconnects; no Developer mod needs to be enabled.
+
+For additional connection detail, enable the **Tier 2 diagnostics** mod
 (Developer group) before hosting or joining. Each match then writes
 `saves/netplay/net_diag.jsonl` (the transport, whether ICE connected directly,
 through STUN or through TURN, and any stalls); attach it with the log. The
