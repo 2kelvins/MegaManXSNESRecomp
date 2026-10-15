@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(MegaManXSNESRecomp VERSION 2.2.3 LANGUAGES C CXX)
+project(MegaManXSNESRecomp VERSION 2.2.4 LANGUAGES C CXX)
 set(CMAKE_C_STANDARD 11)
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 find_package(Git QUIET)
@@ -144,6 +144,7 @@ add_mmx_variant(RockmanXSNESRecomp "${CMAKE_CURRENT_SOURCE_DIR}/variants/jp/gen"
 
 include(CTest)
 if(BUILD_TESTING)
+    add_subdirectory(${SNESRECOMP_ROOT}/runner/tests/diagnostics diagnostic-writer-tests)
     add_executable(mmx_source_assets_test tests/mmx_source_assets_test.cpp src/mmx_source_assets.cpp
         ${SNESRECOMP_ROOT}/runner/src/sha256.c "${CMAKE_CURRENT_BINARY_DIR}/mmx_weapon_sources.h")
     target_include_directories(mmx_source_assets_test PRIVATE src ${CMAKE_CURRENT_BINARY_DIR} ${SNESRECOMP_ROOT}/runner/src)

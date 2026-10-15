@@ -2,6 +2,8 @@
 #include "mmx_coop_view.h"
 #include "mmx_renderer.h"
 #include "mmx_coop_trace.h"
+#include "diagnostics/trace_writer.h"
+#include "host_paths.h"
 #include "mmx_rtl.h"
 #include "mmx_wide_policy.h"
 _Static_assert(sizeof(MmxCoopState) == MMX_COOP_LEGACY_STATE_SIZE + 2 * sizeof(MmxZeroModernState),
@@ -66,79 +68,71 @@ static void sound(uint8_t *r,unsigned command) {
  * host sequence number rather than being mistaken for consecutive simulation. */
 enum { DIAGNOSTIC_SEGMENTS = 32 };
 typedef struct DiagnosticFile {
-  FILE *file;
-  char stem[2048], path[2064];
-  unsigned segment;
-  long bytes;
-  bool checked;
+  SnesTraceWriter *writer;
+  char stem[2048];
+  bool checked, reported_error;
 } DiagnosticFile;
 static DiagnosticFile physics_file, netplay_file;
 static char diagnostic_stamp[32];
 static unsigned long diagnostic_pid;
 static bool diagnostic_enabled;
 static unsigned diagnostic_session;
-static unsigned diagnostic_sequence, diagnostic_rows;
+static unsigned diagnostic_sequence;
 static unsigned select_line; /* source line of the pending MmxCoopSelect, 0 if none */
 extern int snes_frame_counter;
 bool MmxCoopDiagnosticsEnabled(void) {return diagnostic_enabled;}
 static void diagnostic_close(DiagnosticFile *t) {
-  if(t->file) fclose(t->file);
-  t->file=NULL;t->checked=false;t->bytes=0;
+  const char *error=SnesTraceWriterClose(t->writer);
+  if(error && !t->reported_error)
+    fprintf(stderr,"[coop-diagnostics] %s: %s; detailed CSV stopped, replay capture remains active\n",t->stem,error);
+  t->writer=NULL;t->checked=t->reported_error=false;
+}
+static void diagnostic_shutdown(void) {
+  diagnostic_close(&physics_file);diagnostic_close(&netplay_file);
 }
 void MmxCoopSetDiagnosticsEnabled(bool active) {
-  diagnostic_close(&physics_file);diagnostic_close(&netplay_file);
+  diagnostic_shutdown();
   diagnostic_stamp[0]=0;
-  diagnostic_sequence=diagnostic_rows=0;
+  diagnostic_sequence=0;
   diagnostic_enabled=active;
-}
-/* Segment <segment> of a trace: <stem>-001.csv, <stem>-002.csv, ... */
-static void diagnostic_segment_path(const DiagnosticFile *t,unsigned segment,char *out,size_t cap) {
-  snprintf(out,cap,"%s-%03u.csv",t->stem,segment);
 }
 /* Both traces of one session share a stem, so they sort and pair together:
  * logs/coop-physics-<time>-<pid>-<n>-<segment>.csv and logs/coop-netplay-<same>. */
-static FILE *diagnostic_open(DiagnosticFile *t,const char *kind) {
-  if (t->checked) return t->file;
+static SnesTraceWriter *diagnostic_ready(DiagnosticFile *t,const char *kind,const char *header) {
+  if(t->checked) {
+    const char *error=SnesTraceWriterError(t->writer);
+    if(error && !t->reported_error) {
+      fprintf(stderr,"[coop-%s] %s; detailed CSV stopped, replay capture remains active\n",kind,error);
+      t->reported_error=true;
+    }
+    return error?NULL:t->writer;
+  }
   t->checked=true;
+  static bool registered;
+  if(!registered) { atexit(diagnostic_shutdown); registered=true; }
   if(!diagnostic_stamp[0]) {
     time_t now=time(NULL);struct tm *local=localtime(&now);
     snprintf(diagnostic_stamp,sizeof(diagnostic_stamp),"unknown-time");
     if(local) strftime(diagnostic_stamp,sizeof(diagnostic_stamp),"%Y%m%d-%H%M%S",local);
 #ifdef _WIN32
-    _mkdir("logs");diagnostic_pid=(unsigned long)_getpid();
+    diagnostic_pid=(unsigned long)_getpid();
 #else
-    mkdir("logs",0755);diagnostic_pid=(unsigned long)getpid();
+    diagnostic_pid=(unsigned long)getpid();
 #endif
     ++diagnostic_session;
   }
-  snprintf(t->stem,sizeof(t->stem),"logs/coop-%s-%s-%lu-%u",
+  char relative[2048];
+  snprintf(relative,sizeof(relative),"logs/coop-%s-%s-%lu-%u",
       kind,diagnostic_stamp,diagnostic_pid,diagnostic_session);
-  t->segment=1;diagnostic_segment_path(t,t->segment,t->path,sizeof(t->path));
-  t->file=fopen(t->path,"wb");
-  if (!t->file) {fprintf(stderr,"[coop-%s] cannot open %s\n",kind,t->path);return NULL;}
-  fprintf(stderr,"[coop-%s] recording %s (32 MiB per segment, newest %u kept)\n",
-      kind,t->path,(unsigned)DIAGNOSTIC_SEGMENTS);
-  return t->file;
-}
-/* Start the next numbered segment; drop the one that leaves the window. */
-static FILE *diagnostic_ready(DiagnosticFile *t,const char *kind,const char *header) {
-  if (!diagnostic_open(t,kind)) return NULL;
-  if (t->bytes>=32L*1024*1024) {
-    fclose(t->file);t->file=NULL;
-    ++t->segment;
-    if (t->segment>DIAGNOSTIC_SEGMENTS) {
-      /* Every segment of this stem belongs to this explicitly requested trace. */
-      char old[2064];
-      diagnostic_segment_path(t,t->segment-DIAGNOSTIC_SEGMENTS,old,sizeof(old));
-      remove(old);
-    }
-    diagnostic_segment_path(t,t->segment,t->path,sizeof(t->path));
-    t->file=fopen(t->path,"wb");
-    if (!t->file) {fprintf(stderr,"[coop-%s] cannot open %s; recording stopped\n",kind,t->path);return NULL;}
-    t->bytes=0;
+  if(snesrecomp_abspath(relative,t->stem,sizeof(t->stem)))
+    t->writer=SnesTraceWriterOpen(t->stem,header,32u*1024*1024,DIAGNOSTIC_SEGMENTS);
+  if(!t->writer) {
+    fprintf(stderr,"[coop-%s] cannot start diagnostic writer; replay capture remains active\n",kind);
+    return NULL;
   }
-  if (!t->bytes) t->bytes=fprintf(t->file,"%s",header);
-  return t->file;
+  fprintf(stderr,"[coop-%s] recording %s-001.csv (background writer, 32 MiB per segment, newest %u kept)\n",
+      kind,t->stem,(unsigned)DIAGNOSTIC_SEGMENTS);
+  return t->writer;
 }
 /* Every live slot of an object pool: slot, class (+0A), X (+05), Y (+08),
  * state bytes +00..02 and the rider latch +2C. Items ($1628 + slot*$30) hold
@@ -175,7 +169,7 @@ static const char kPhysicsHeader[]=
     "upgrades,caller,items,regs,slot,enemies,shots\n";
 static void diagnostic_event(const uint8_t *r,const CpuState *cpu,uint32_t pc,const char *event) {
   if (!diagnostic_enabled || !enabled || !state.initialized) return;
-  FILE *out=diagnostic_ready(&physics_file,"physics",kPhysicsHeader);
+  SnesTraceWriter *out=diagnostic_ready(&physics_file,"physics",kPhysicsHeader);
   if (!out) return;
   bool frame_end=!strcmp(event,"frame-end");
   bool platform=!strncmp(event,"platform",8) || !strncmp(event,"contact",7) ||
@@ -234,7 +228,8 @@ static void diagnostic_event(const uint8_t *r,const CpuState *cpu,uint32_t pc,co
     if(frame_end || platform || !strcmp(event,"pickup"))
       diagnostic_hex(body,b,0x90);
     int x=word(b+5),y=word(b+8);
-    int count=fprintf(out,
+    char row[8192];
+    int count=snprintf(row,sizeof(row),
         "%u,%d,%u,%s,%06x,%04x,%04x,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%04x,"
         "%u,%u,%u,%u,%s,%s,%u,%u,%u,%04x,%d,%d,%u,%u,%d,%d,%u,%u,%u,%u,%u,%u,%s,%s,"
         "%02x,%s,%s,%s,%s,%s,%s\n",
@@ -247,10 +242,11 @@ static void diagnostic_event(const uint8_t *r,const CpuState *cpu,uint32_t pc,co
         MmxWeaponsTerrainClass(r,x,y+8),MmxWeaponsTerrainSolid(r,x,y+8,true,NULL),
         MmxWeaponsTerrainClass(r,x,y+16),MmxWeaponsTerrainSolid(r,x,y+16,true,NULL),body,scratch,
         r[0x1f99],caller,items,regs,slot,enemies,shots);
-    if(count<0) {diagnostic_close(&physics_file);physics_file.checked=true;return;}
-    physics_file.bytes+=count;
+    if(count<0 || (size_t)count>=sizeof(row)) {
+      SnesTraceWriterWrite(out,NULL,0);return;
+    }
+    if(!SnesTraceWriterWrite(out,row,(size_t)count)) return;
   }
-  if (++diagnostic_rows%60==0) fflush(out);
 }
 static uint32_t diagnostic_hash(const void *data,size_t size) {
   const uint8_t *p=data;uint32_t h=2166136261u;
@@ -270,7 +266,7 @@ static const char kNetplayHeader[]=
 static void diagnostic_netplay(const uint8_t *r) {
 #if SNESRECOMP_NET
   if (!diagnostic_enabled || !snes_netplay_active()) return;
-  FILE *out=diagnostic_ready(&netplay_file,"netplay",kNetplayHeader);
+  SnesTraceWriter *out=diagnostic_ready(&netplay_file,"netplay",kNetplayHeader);
   if (!out) return;
   uint32_t tick=0,local=0,remote=0;
   char desync[12]="";
@@ -283,7 +279,8 @@ static void diagnostic_netplay(const uint8_t *r) {
   char bodies[2][0x90*2+1];
   for(unsigned i=0;i<2;++i) diagnostic_hex(bodies[i],state.players[i].body,0x90);
   const uint8_t *shared=(const uint8_t *)&state+sizeof(state.players);
-  int count=fprintf(out,
+  char row[2048];
+  int count=snprintf(row,sizeof(row),
       "%u,%d,%u,%u,%u,%u,%d,%d,%d,%d,%s,%d,%d,%d,%u,%x,%d,%d,%d,%s,%08x,%08x,"
       "%04x,%04x,%u,%u,%u,%u,%u,%u,%08x,%08x,%08x,%08x,%08x,%s,%s\n",
       diagnostic_sequence,snes_frame_counter,r[0xb9c],(unsigned)snes_netplay_sim_tick(),
@@ -299,9 +296,8 @@ static void diagnostic_netplay(const uint8_t *r) {
       diagnostic_hash(&state.players[0],sizeof(state.players[0])),
       diagnostic_hash(&state.players[1],sizeof(state.players[1])),
       diagnostic_hash(shared,sizeof(state)-sizeof(state.players)),bodies[0],bodies[1]);
-  if(count<0) {diagnostic_close(&netplay_file);netplay_file.checked=true;return;}
-  netplay_file.bytes+=count;
-  if (diagnostic_rows%60==0) fflush(out);
+  if(count<0 || (size_t)count>=sizeof(row)) { SnesTraceWriterWrite(out,NULL,0);return; }
+  SnesTraceWriterWrite(out,row,(size_t)count);
 #else
   (void)r;
 #endif

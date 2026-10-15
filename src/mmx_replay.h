@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 /* Bounded, frame-boundary diagnostic recording, shared by desktop and tests. */
+void MmxReplayRomLoaded(void);
 void MmxReplayEnable(bool enabled);
 void MmxReplaySetConfigPath(const char *path);
 void MmxReplayStateLoaded(void);
