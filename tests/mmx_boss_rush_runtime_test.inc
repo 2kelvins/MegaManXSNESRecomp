@@ -12,6 +12,57 @@ static void rush_keep_players_alive(void) {
   }
 }
 static unsigned rush_death_sounds;
+static uint8_t rush_extension_value;
+static void rush_extension_reset(uint8_t *ram) {(void)ram;rush_extension_value=0;}
+static void rush_extension_save(uint8_t out[]) {out[0]='R';out[1]=rush_extension_value;}
+static void rush_extension_load(const uint8_t in[]) {if(in[0]=='R')rush_extension_value=in[1];}
+static void rush_state_format_checks(uint8_t *start,uint8_t *legacy,uint8_t *actual,size_t cap) {
+  static const MmxZeroExtension extension={.state_reset=rush_extension_reset,
+      .state_save=rush_extension_save,.state_load=rush_extension_load};
+  MmxZeroSetExtension(&extension);rush_extension_value=7;
+  size_t n=RtlSaveSnapshotToMemory(start,cap);check(n,"combined Zero/Rush snapshot saves");
+  size_t rush_bytes=sizeof(MmxBossRushState),audio_bytes=sizeof(MmxBossRushAudioState),
+      visual_bytes=sizeof(MmxBossRushVisualState);
+  size_t tail=n-MMX_ZERO_EXTENSION_STATE_BYTES-rush_bytes-audio_bytes-visual_bytes;
+  size_t chunk=0;
+  for(size_t i=n-8;i>8;--i) {
+    uint32_t magic;memcpy(&magic,start+i,4);
+    if(magic==0x4d4d5854u) {chunk=i;break;}
+  }
+  check(chunk && tail>chunk,"bounded game state tail located");
+  uint32_t version;memcpy(&version,start+chunk+4,4);
+  check(version==21,"combined state uses unambiguous v21");
+  MmxBossRushState original=MmxBossRushGetState();
+  for(unsigned format=0;format<5;++format) {
+    memcpy(legacy,start,n);size_t length=n;
+    version=format?format+17:18;
+    if(!format) length=tail+MMX_ZERO_EXTENSION_STATE_BYTES; /* main v18 */
+    else if(format<4) {
+      size_t bytes=rush_bytes+(format>=2?audio_bytes:0)+(format>=3?visual_bytes:0);
+      memmove(legacy+tail,start+tail+MMX_ZERO_EXTENSION_STATE_BYTES,bytes);
+      length=tail+bytes; /* original Rush v18/v19/v20 */
+    }
+    memcpy(legacy+chunk+4,&version,4);rush_extension_value=99;
+    check(RtlLoadSnapshotFromMemory(legacy,length),"main/preview/current memory state imports");
+    check(rush_extension_value==(format==0 || format==4?7:0),
+        "only main/current states restore the Zero extension blob");
+    MmxBossRushState loaded=MmxBossRushGetState();
+    check(format?!memcmp(&original,&loaded,sizeof(loaded)):loaded.mode==MMX_RUSH_OFF,
+        "old main v18 has no Rush state; each preview keeps its queue");
+    if(!format) {
+      FILE *f=fopen("rush-main-v18.sav","wb");check(f!=NULL,"main v18 file opens");
+      check(fwrite(legacy,1,length,f)==length && !fclose(f),"main v18 file writes");
+      rush_extension_value=99;
+      check(RtlLoadSnapshot("rush-main-v18.sav") && rush_extension_value==7,
+          "main v18 file restores its extension without misreading Rush");
+    }
+  }
+  check(RtlLoadSnapshotFromMemory(start,n),"current combined state restores");
+  size_t an=RtlSaveSnapshotToMemory(actual,cap);
+  same(start,n,actual,an,"combined extension/Rush immediate restore is byte exact");
+  MmxZeroSetExtension(NULL);
+  puts("MMX BOSS RUSH STATE FORMAT CHECKS PASSED");
+}
 static void rush_replacement_menu_checks(uint8_t *start,uint8_t *expected,size_t cap) {
   MmxBossRushState s=MmxBossRushGetState();
   static const uint8_t queue[]={0,4,2,5,1,3,6,7};
@@ -629,6 +680,7 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
   check(g_ram[0xfffd]==boss_bank && g_ram[0xfffd]!=stage_bank,
       "native boss music bank replaces the stage bank");
   check(MmxBossRushGetState().mode==MMX_RUSH_PLAYING,"crossing the second door starts the encounter");
+  if(getenv("MMX_BOSS_RUSH_STATE_FORMAT_TEST")) {rush_state_format_checks(start,expected,actual,cap);return;}
   if(getenv("MMX_BOSS_RUSH_AUDIO_TEST")) {rush_audio_checks(start,cap);return;}
   if(getenv("MMX_BOSS_RUSH_DEATH_TEST")) {rush_natural_death_checks();return;}
   if(getenv("MMX_BOSS_RUSH_HIT_VISUAL_TEST")) {rush_hit_visual_checks(start,expected,cap);return;}

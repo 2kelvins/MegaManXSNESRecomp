@@ -349,3 +349,20 @@ and widescreen margin. `MMX_BOSS_RUSH_DEATH_TEST=1` with
 `MMX_BOSS_RUSH_TEST=1` captures the native fatal-contact sequence before and
 after the body burst, checks one death-sound request and reaches Game Over.
 Reviewed playtest10 captures show the original death orbs with no retained armor.
+
+## Rebase onto 2.2.4 main
+
+The October 15 prerelease rebases Boss Rush onto game main `2fc7c35`, retaining
+the newer Saber Zero integration, diagnostic replays and background diagnostic
+writers. Framework PR157 is rebased onto the framework pin from that main;
+its hook-capacity and rollback-audio fixes remain required by Boss Rush.
+Both PRs remain unmerged.
+
+New game snapshots use chunk v21: the Zero extension blob followed by Rush,
+audio cues and camouflage state. Main's released v18 stored only the extension,
+while the earlier Rush v18..20 previews stored Rush tails without it. The loader
+distinguishes these layouts by their bounded tail lengths. The ROM-backed
+`MMX_BOSS_RUSH_STATE_FORMAT_TEST=1` fixture checks both v18 meanings, preview
+v19/v20, combined v21, file/memory imports and byte-exact immediate restoration.
+This format compatibility does not establish multiplayer compatibility between
+builds; the existing build identity checks remain in place.
