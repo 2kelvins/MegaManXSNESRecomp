@@ -29,7 +29,10 @@ static unsigned stack_pop(CpuState *cpu,unsigned bytes) {
   return v;
 }
 static bool arena_ready(const uint8_t *r) {
-  return word(r+0x1e4d)==0x1e00 && word(r+0xbad)>=0x1e20 &&
+  /* Reach the expanded room's right side before requesting music and
+   * releasing either boss seat. */
+  unsigned right=r[0x1f7a]==4?0x1e00+MMX_RUSH_MAMMOTH_SCROLL+208:0x1e20;
+  return word(r+0x1e4d)>=0x1e00 && word(r+0xbad)>=right &&
       r[0xbaa]!=0x1a && r[0xbaa]!=0x18 && !r[0xc16];
 }
 /* These are scene/camera flags, not inventory or player combat state. Native
@@ -175,6 +178,21 @@ static void boss_hook(CpuState *cpu,uint32_t pc) {
     if(end) {interp_bridge_pre_opcode_redirect((pc&0xff0000)|end);return;}
   }
   if(owner<0) return;
+  if(g_ram[0x1f7a]==4 && s.bosses[owner].id==0) {
+    /* Move the native handle constructor and both body approach/landing
+     * calculations together. Each hook follows the original 16-bit load or
+     * add; subsequent native comparisons/motion still use the same target.
+     * Never change the shared camera or Penguin's other attack boundaries. */
+    bool body=s.bosses[owner].object==cpu->D;
+    if((body && (at==0x01b7bf || at==0x01b81b)) ||
+        (!body && at==0x07efd2 && g_ram[cpu->D+10]==0x12)) {
+      unsigned origin=s.camera_x+MMX_RUSH_MAMMOTH_SCROLL+MMX_RUSH_HOOK_SCREEN_X-128;
+      unsigned value=at==0x01b81b?cpu->A-word(g_ram+0x1e60)+origin:origin;
+      cpu->A=(uint16_t)value;cpu->_flag_Z=!cpu->A;cpu->_flag_N=cpu->A>>15;
+      cpu->P=(cpu->P&~0x82u)|(cpu->_flag_Z?2:0)|(cpu->_flag_N?128:0);
+      return;
+    }
+  }
   if(at==0x028297 || at==0x02829d || at==0x03b192) {
     /* $82:827D initializes OBJ metadata from the current stage's $7F
      * allocation tables. Cross-stage bodies otherwise save palette zero
@@ -222,10 +240,13 @@ static void boss_hook(CpuState *cpu,uint32_t pc) {
   }
   if(s.bosses[owner].id==7 && s.bosses[owner].phase==MMX_RUSH_ENTERING) {
     if(at==0x079258) {
-      put(g_ram+cpu->D+5,s.camera_x+144);put(g_ram+cpu->D+8,s.camera_y+160);
+      /* The room has already been opened for every pair. His stock intro
+       * must not add $70 again to its private movement boundary. */
+      if(g_ram[0x1f7a]==4) put(g_ram+0x1e60,s.camera_x+MMX_RUSH_MAMMOTH_SCROLL);
+      put(g_ram+cpu->D+5,word(g_ram+0x1e4d)+144);put(g_ram+cpu->D+8,s.camera_y+160);
     }
     /* The factory waits for a player to walk under the entrance platform.
-     * In this fixed room the arrival starts independently of that distance. */
+     * Rush starts his arrival on the visible screen after the run trigger. */
     if(at==0x079276) {
       interp_bridge_pre_opcode_redirect((pc&0xff0000)|0x9281);return;
     }
@@ -276,7 +297,7 @@ void MmxBossRushHostFrame(void) {
   const unsigned bosses[]={0x849feb,0x84a003,0x84aadd,0x84a677,0x849b03,0x849b43,
     0x848fca,0x848fad,0x9ac7,0xdc36,0xdd47,0xd1ed,0x94d9,0x8c56,0xe68e,0x879258,0x879276,0x8088d6,0x849f19,0x849f2a,0x849f2f,0x849f7e,
     0x8885b5,0x888dab,0x888e0f,0x888d79,0x888d2f,0x888d5e,0x88876a,0x828297,0x82829d,0x83b192,
-    0x8498ff,0x84990d};
+    0x8498ff,0x84990d,0x81b7bf,0x81b81b,0x87efd2};
   for(unsigned i=0;i<sizeof(bosses)/sizeof(*bosses);++i)
     registered&=interp_bridge_add_pre_opcode_hook(bosses[i],boss_hook);
   static bool warned;
@@ -358,6 +379,14 @@ static void camera(uint8_t *r) {
    * preserve the native zero origin from the first clear through its fades. */
   if(!word(r+0x1e4d) || !MmxWidePolicy_IsStageScene(r)) return;
   MmxBossRushState s=MmxBossRushGetState();
+  if(r[0x1f7a]==4) {
+    /* The door first locks one screen; Mammoth's stock intro normally opens
+     * the extra $70. Do that for every pair after the door releases, retaining
+     * the native gradual boundary update, player follow and menu restoration. */
+    if(word(r+0x1e4d)<s.camera_x || r[0xbaa]==0x18 || r[0xbaa]==0x1a || r[0xc16]) return;
+    put(r+0x1e5e,s.camera_x);put(r+0x1e60,s.camera_x+MMX_RUSH_MAMMOTH_SCROLL);
+    return;
+  }
   put(r+0x1e4d,s.camera_x);put(r+0x1e50,s.camera_y);
   put(r+0x1e56,s.camera_x);put(r+0x1e58,s.camera_x);
   put(r+0x1e5a,s.camera_y);put(r+0x1e5c,s.camera_y);
@@ -412,7 +441,7 @@ void MmxBossRushFrame(uint8_t *r,uint16_t input) {
         r[0xbaa]!=14 && !r[0xc0c] && !r[0xc16]) prepare(r);
     return;
   }
-  if(s.mode==MMX_RUSH_PREPARING) return;
+  if(s.mode==MMX_RUSH_PREPARING) {camera(r);return;}
   camera(r);
   if(r[0xd3]==4 && !r[0x1f19] && !MmxWeaponsMenuVisible(r) && !MmxCoopGetState().menu_owner) {
     for(unsigned i=0;i<2;++i) {
@@ -441,7 +470,7 @@ void MmxBossRushFrame(uint8_t *r,uint16_t input) {
           s.bosses[i].globals[n]=r[globals[n]];
         MmxBossRushSetState(&s);
         memset(r+object,0,64);r[object]=0x81;r[object+10]=kMmxBossRushBosses[id].kind;
-        unsigned x=s.camera_x+144+i*48,y=s.camera_y+(id==4?43:96);
+        unsigned x=word(r+0x1e4d)+144+i*48,y=s.camera_y+(id==4?43:96);
         put(r+object+5,x);put(r+object+8,y);put(r+object+0x22,x);put(r+object+0x24,y);
       }
     }

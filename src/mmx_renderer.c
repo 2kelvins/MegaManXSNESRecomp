@@ -927,7 +927,8 @@ static uint16_t background(const Ppu *p, const Raster *r, unsigned layer, int x,
   static const unsigned low[] = {8, 7, 1}, high[] = {12, 11, 3};
   if(stage && layer==0 && frame.ram[0x1f7a]==4 &&
       (frame_rush.mode==MMX_RUSH_PLAYING || frame_rush.mode==MMX_RUSH_PREPARING)) {
-    int sx=x+view_camera(frame.ram,0x1e4d)-(int)frame_rush.camera_x-96;
+    int hook_x=frame_rush.camera_x+MMX_RUSH_MAMMOTH_SCROLL+MMX_RUSH_HOOK_SCREEN_X;
+    int sx=x+view_camera(frame.ram,0x1e4d)-hook_x+32;
     int sy=y+view_camera(frame.ram,0x1e50)-(int)frame_rush.camera_y;
     int pixel=MmxRenderAssetsRushCeilingPixel((unsigned)sx,(unsigned)sy);
     if(pixel>=0) {
@@ -2238,7 +2239,14 @@ bool MmxRendererDraw(uint32_t *out, MmxRenderView view, bool hud) {
   }
   for (unsigned i = 0; i < frame_debug_rect_count; ++i)
     draw_debug_rect(out, view, &frame_debug_rects[i]);
-  if(stage) MmxBossRushDraw(out,view.width,view.extra,&frame_rush);
+  if(stage) {
+    MmxBossRushState draw_rush=frame_rush;
+    for(unsigned i=0;i<2;++i) {
+      draw_rush.bosses[i].death_x-=view_camera(frame.ram,0x1e4d)-frame_rush.camera_x;
+      draw_rush.bosses[i].death_y-=view_camera(frame.ram,0x1e50)-frame_rush.camera_y;
+    }
+    MmxBossRushDraw(out,view.width,view.extra,&draw_rush);
+  }
   if(rush_hud && frame_rush.mode==MMX_RUSH_PLAYING) {
     char count[32];snprintf(count,sizeof(count),"DEFEATED %u",frame_rush.defeated);
     rush_native_text(out,view,view.width/2-(int)strlen(count)*4,208,count,7);

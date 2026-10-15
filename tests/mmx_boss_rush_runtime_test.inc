@@ -12,6 +12,59 @@ static void rush_keep_players_alive(void) {
   }
 }
 static unsigned rush_death_sounds;
+static void rush_scrolling_checks(uint8_t *snapshot,size_t cap) {
+  size_t n=RtlSaveSnapshotToMemory(snapshot,cap);check(n,"scrolling encounter snapshot saves");
+  MmxBossRushState s=MmxBossRushGetState();unsigned hook=0;
+  for(unsigned d=0x1628;d<0x1928;d+=48)
+    if(g_ram[d] && g_ram[d+10]==0x12 && MmxBossRushOwner(d)==0) hook=d;
+  unsigned hook_x=s.camera_x+MMX_RUSH_MAMMOTH_SCROLL+MMX_RUSH_HOOK_SCREEN_X;
+  check(hook && eagle_word(g_ram+hook+5)==hook_x,
+      "Penguin's native handle aligns with the mount near the right wall");
+  unsigned body=s.bosses[0].object;
+  g_ram[body+1]=4;g_ram[body+2]=2;g_ram[body+3]=0;
+  bool pulled=false;
+  for(unsigned t=0;t<420;++t) {
+    frame(0);rush_keep_players_alive();
+    pulled|=g_ram[hook+0x1b]!=0;
+    if(pulled) break;
+  }
+  fprintf(stderr,"rush handle x=%04x target=%04x pulled=%u body=%04x,%04x state=%u:%u\n",
+      eagle_word(g_ram+hook+5),hook_x,pulled,eagle_word(g_ram+body+5),eagle_word(g_ram+body+8),
+      g_ram[body+2],g_ram[body+3]);
+  check(pulled,"Penguin's native jump reaches and pulls the relocated handle");
+  check(abs((int)eagle_word(g_ram+body+5)-(int)hook_x)<=12,
+      "Penguin's grabbing pose stays beside the relocated handle");
+  check(MmxRendererSaveCapture("rush-penguin-hook.cap"),"native right-side handle pull capture saves");
+  check(RtlLoadSnapshotFromMemory(snapshot,n),"encounter restores after handle check");
+  unsigned right=eagle_word(g_ram+0x1e58),left=eagle_word(g_ram+0x1e56);
+  check(right-left==MMX_RUSH_MAMMOTH_SCROLL,"combat keeps the original Mammoth scroll range");
+  for(unsigned direction=0;direction<2;++direction) {
+    unsigned key=direction?SNES_PAD_RIGHT:SNES_PAD_LEFT;
+    for(unsigned t=0;t<720;++t) {
+      g_ram[0xbd3]=120;
+      if(MmxCoopEnabled()) {
+        MmxCoopState c=MmxCoopGetState();
+        for(unsigned i=0;i<2;++i)c.players[i].body[0x2b]=120;
+        MmxCoopSetState(&c);
+      }
+      frame(key|(MmxCoopEnabled()?key<<12:0));rush_keep_players_alive();
+      if(t%120==0)fprintf(stderr,"rush scroll tick=%u dir=%u action=%u:%u script=%u lock=%u freeze=%u/%u/%u x=%04x\n",
+          t,direction,g_ram[0xbaa],g_ram[0xbab],g_ram[0xc01],g_ram[0xc16],g_ram[0x1f26],g_ram[0xc0c],g_ram[0x1f13],eagle_word(g_ram+0xbad));
+      if(eagle_word(g_ram+0x1e4d)==(direction?right:left)) break;
+    }
+    unsigned cam=eagle_word(g_ram+0x1e4d);
+    fprintf(stderr,"rush combat scroll direction=%u x=%04x camera=%04x limits=%04x/%04x\n",
+        direction,eagle_word(g_ram+0xbad),cam,eagle_word(g_ram+0x1e56),eagle_word(g_ram+0x1e58));
+    check(direction?cam==right:cam==left,"players can scroll to both ends during the two-boss fight");
+    s=MmxBossRushGetState();
+    check(s.bosses[0].phase==MMX_RUSH_FIGHTING && s.bosses[1].phase==MMX_RUSH_FIGHTING && !s.defeated,
+        "both bosses remain alive while the room scrolls away and back");
+    check(eagle_word(g_ram+hook+5)==hook_x,"native handle stays anchored while the camera moves");
+    check(MmxRendererSaveCapture(direction?"rush-combat-right.cap":"rush-combat-left.cap"),"scrolling combat capture saves");
+  }
+  check(RtlLoadSnapshotFromMemory(snapshot,n),"encounter restores after scrolling checks");
+  frame(0);rush_keep_players_alive();
+}
 static void rush_conveyor_checks(uint8_t *snapshot,size_t cap) {
   size_t n=RtlSaveSnapshotToMemory(snapshot,cap);check(n,"live conveyor fixture saves");
   for(unsigned seat=0;seat<2;++seat) for(unsigned phase=0;phase<4;++phase) for(unsigned direction=0;direction<2;++direction) {
@@ -161,8 +214,10 @@ static void rush_replacement_menu_checks(uint8_t *start,uint8_t *expected,size_t
     size_t en=RtlSaveSnapshotToMemory(expected,cap);frame(0);
     check(RtlLoadSnapshotFromMemory(expected,en),"native pause camera snapshot restores");
     frame(SNES_PAD_START);zero_replay(90);s=MmxBossRushGetState();
-    check(MmxWidePolicy_IsStageScene(g_ram) && eagle_word(g_ram+0x1e4d)==s.camera_x &&
-        eagle_word(g_ram+0x1e50)==s.camera_y,"closing pause restores the Rush arena camera");
+    check(MmxWidePolicy_IsStageScene(g_ram) && eagle_word(g_ram+0x1e4d)>=s.camera_x &&
+        eagle_word(g_ram+0x1e4d)<=s.camera_x+MMX_RUSH_MAMMOTH_SCROLL &&
+        eagle_word(g_ram+0x1e58)-eagle_word(g_ram+0x1e56)==MMX_RUSH_MAMMOTH_SCROLL &&
+        eagle_word(g_ram+0x1e50)==s.camera_y,"closing pause restores the scrolling Rush arena camera");
     puts("MMX BOSS RUSH NATIVE PAUSE CHECKS PASSED");return;
   }
   size_t n=RtlSaveSnapshotToMemory(start,cap);check(n,"two-boss replacement fixture saves");
@@ -627,7 +682,21 @@ static void rush_audio_checks(uint8_t *snapshot,size_t cap) {
 static void rush_projectile_defeat(unsigned seat,unsigned weapon) {
   MmxBossRushState s=MmxBossRushGetState();unsigned object=s.bosses[seat].object;
   unsigned count=s.defeated;g_ram[object+0x27]=1;
-  g_ram[0xbdb]=(uint8_t)(weapon*2);
+  /* Fire from inside the room; shots at the new right-wall trigger can hit
+   * the wall and retire before the next frame's forced collision. Configure
+   * the actual port-1 shooter even when a yielded co-op call projects P2. */
+  if(MmxCoopEnabled()) {
+    MmxCoopCapture(g_ram);MmxCoopState c=MmxCoopGetState();
+    for(unsigned i=0;i<2;++i) {
+      eagle_putword(c.players[i].body+5,s.camera_x+100+i*32);
+      c.players[i].body[0x11]&=~64u;
+    }
+    c.players[0].body[0x33]=(uint8_t)(weapon*2);
+    MmxCoopSetState(&c);memcpy(g_ram+0xba8,c.players[c.current].body,sizeof(c.players[c.current].body));
+  } else {
+    eagle_putword(g_ram+0xbad,s.camera_x+100);g_ram[0xbb9]&=~64u;
+    g_ram[0xbdb]=(uint8_t)(weapon*2);
+  }
   for(unsigned t=0;t<360 && MmxBossRushGetState().defeated==count;++t) {
     /* Give a real native weapon projectile a guaranteed collision. Reducing
      * the fixture to 1 HP saves time; the finishing hit and death are guest code. */
@@ -635,7 +704,17 @@ static void rush_projectile_defeat(unsigned seat,unsigned weapon) {
       memcpy(g_ram+d+5,g_ram+object+5,2);memcpy(g_ram+d+8,g_ram+object+8,2);
       g_ram[d+4]=g_ram[d+7]=0;
     }
-    if(MmxCoopEnabled()) MmxCoopCapture(g_ram);
+    if(MmxCoopEnabled()) {
+      MmxCoopCapture(g_ram);MmxCoopState c=MmxCoopGetState();
+      /* A frame can end with either seat projected. The shooter's live
+       * projectiles may therefore be in its saved body, outside guest WRAM. */
+      for(unsigned p=0;p<2;++p) for(unsigned d=0;d<sizeof(c.players[p].shots);d+=64) {
+        uint8_t *shot=c.players[p].shots+d;if(!shot[0]) continue;
+        memcpy(shot+5,g_ram+object+5,2);memcpy(shot+8,g_ram+object+8,2);
+        shot[4]=shot[7]=0;
+      }
+      MmxCoopSetState(&c);memcpy(g_ram+0x1228,c.players[c.current].shots,sizeof(c.players[c.current].shots));
+    }
     frame(t%12==0?SNES_PAD_Y:0);rush_keep_players_alive();
   }
   s=MmxBossRushGetState();
@@ -702,7 +781,7 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
   zero_replay(180);
   check(MmxBossRushGetState().mode==MMX_RUSH_PREPARING &&
       !MmxBossRushGetState().bosses[0].phase && !MmxBossRushGetState().bosses[1].phase,
-      "preparation waits for the second door before spawning bosses");
+      "preparation waits for the right-edge trigger before spawning bosses");
   check(g_ram[0x1f9a]==32 && g_ram[0x1f99]==255,"run starts fully upgraded");
   for(unsigned i=0;i<4;++i) check((g_ram[0x1f83+i]&127)==28,"shared subtank starts full");
   for(unsigned i=0;i<8;++i) check(g_ram[0x1f88+i*2]==0xdc,"X1 weapon starts owned and full");
@@ -713,18 +792,36 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
         "both co-op players start alive");
     check((c.players[0].body[0x27]&127)==32 && (c.players[1].body[0x27]&127)==32,"both co-op players start at maximum health");
   }
-  unsigned stage_bank=g_ram[0xfffd];bool native_door=false,music_replayed=false;
+  unsigned stage_bank=g_ram[0xfffd],furthest_camera=0;
+  unsigned walk_right=SNES_PAD_RIGHT|(coop_assets?SNES_PAD_RIGHT<<12:0);
+  bool native_door=false,music_replayed=false,stopped_inside=false;
   for(unsigned t=0;t<1200 && MmxBossRushGetState().mode==MMX_RUSH_PREPARING;++t) {
+    if(t%60==0) fprintf(stderr,"rush approach tick=%u x=%04x camera=%04x limits=%04x/%04x targets=%04x/%04x\n",
+        t,eagle_word(g_ram+0xbad),eagle_word(g_ram+0x1e4d),eagle_word(g_ram+0x1e56),
+        eagle_word(g_ram+0x1e58),eagle_word(g_ram+0x1e5e),eagle_word(g_ram+0x1e60));
+    if(!stopped_inside && eagle_word(g_ram+0xbad)>=0x1e60 &&
+        g_ram[0xbaa]!=0x18 && g_ram[0xbaa]!=0x1a && !g_ram[0xc16]) {
+      zero_replay(90);
+      MmxBossRushState waiting=MmxBossRushGetState();
+      check(waiting.mode==MMX_RUSH_PREPARING && !waiting.bosses[0].phase &&
+          !waiting.bosses[1].phase && g_ram[0xfffd]==stage_bank,
+          "stopping inside the room keeps both bosses and battle music pending");
+      check(eagle_word(g_ram+0x1e58)>eagle_word(g_ram+0x1e56),
+          "Mammoth's native room retains horizontal scrolling limits");
+      check(MmxRendererSaveCapture("rush-arena-left.cap"),"left side of the scrolling arena capture saves");
+      stopped_inside=true;
+    }
     if(!music_replayed && MmxBossRushGetState().loaded==MMX_RUSH_MUSIC_PENDING) {
       size_t pending=RtlSaveSnapshotToMemory(expected,cap);
       check(pending!=0,"pending native music upload snapshot saves");
-      frame(SNES_PAD_RIGHT);size_t en=RtlSaveSnapshotToMemory(actual,cap);
+      frame(walk_right);size_t en=RtlSaveSnapshotToMemory(actual,cap);
       check(RtlLoadSnapshotFromMemory(expected,pending),"pending native music upload restores");
-      frame(SNES_PAD_RIGHT);size_t an=RtlSaveSnapshotToMemory(start,cap);
+      frame(walk_right);size_t an=RtlSaveSnapshotToMemory(start,cap);
       same(actual,en,start,an,"pending native music upload replays deterministically");
       music_replayed=true;
     }
-    frame(SNES_PAD_RIGHT);native_door|=g_ram[0xbaa]==0x18 || g_ram[0xbaa]==0x1a;
+    frame(walk_right);native_door|=g_ram[0xbaa]==0x18 || g_ram[0xbaa]==0x1a;
+    if(eagle_word(g_ram+0x1e4d)>furthest_camera) furthest_camera=eagle_word(g_ram+0x1e4d);
   }
   fprintf(stderr,"rush music bank before=%02x after=%02x door=%u\n",
       stage_bank,g_ram[0xfffd],native_door);
@@ -745,7 +842,10 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
   fprintf(stderr,"retail Penguin battle command=%02x bank=%02x\n",boss_song,boss_bank);
   check(g_ram[0xfffd]==boss_bank && g_ram[0xfffd]!=stage_bank,
       "native boss music bank replaces the stage bank");
-  check(MmxBossRushGetState().mode==MMX_RUSH_PLAYING,"crossing the second door starts the encounter");
+  check(stopped_inside && furthest_camera>0x1e00,"walking through the arena scrolls beyond its first screen");
+  check(MmxBossRushGetState().mode==MMX_RUSH_PLAYING &&
+      eagle_word(g_ram+0xbad)>=eagle_word(g_ram+0x1e58)+208,
+      "reaching the room's right edge starts the encounter");
   if(getenv("MMX_BOSS_RUSH_ARENA_TEST")) {
     MmxBossRushState s=MmxBossRushGetState();
     memset(s.bosses,0,sizeof(s.bosses));memset(s.owner,0,sizeof(s.owner));
@@ -766,6 +866,7 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
         s.bosses[0].phase==MMX_RUSH_FIGHTING && s.bosses[1].phase==MMX_RUSH_FIGHTING,
         "Penguin and Mammoth complete entrances in the new arena");
     check(MmxRendererSaveCapture("rush-mammoth-arena.cap"),"Mammoth arena capture saves");
+    rush_scrolling_checks(start,cap);
     rush_conveyor_checks(start,cap);
     for(unsigned t=0;t<7;++t) {frame(0);rush_keep_players_alive();}
     check(MmxRendererSaveCapture("rush-mammoth-arena-later.cap"),"later Mammoth arena capture saves");
@@ -779,11 +880,16 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
         "native Mammoth defeat stops the conveyor immediately");
     for(unsigned t=0;t<90;++t) {frame(0);rush_keep_players_alive();}
     static uint32_t stopped[256*224],later[256*224];
+    unsigned stopped_camera=eagle_word(g_ram+0x1e4d);
     check(MmxRendererDraw(stopped,(MmxRenderView){256,0,4.0/3.0},true),"stopped conveyor renders");
     for(unsigned t=0;t<17;++t) {frame(0);rush_keep_players_alive();}
     check(MmxRendererDraw(later,(MmxRenderView){256,0,4.0/3.0},true),"stopped conveyor renders later");
-    for(unsigned y=200;y<224;++y)
-      check(!memcmp(stopped+y*256+32,later+y*256+32,192*sizeof(*stopped)),
+    unsigned later_camera=eagle_word(g_ram+0x1e4d);
+    unsigned belt_x=(stopped_camera>later_camera?stopped_camera:later_camera)+32;
+    /* Follow one world-space belt patch; player follow can keep scrolling
+     * after a hit, and the room's right-hand machinery animates separately. */
+    for(unsigned y=200;y<208;++y)
+      check(!memcmp(stopped+y*256+belt_x-stopped_camera,later+y*256+belt_x-later_camera,96*sizeof(*stopped)),
           "conveyor pixels stay stationary after Mammoth is replaced");
     check(MmxRendererSaveCapture("rush-conveyor-stopped.cap"),"stopped conveyor capture saves");
     check(RtlLoadSnapshotFromMemory(start,n),"live Mammoth arena restores after defeat checks");
@@ -803,14 +909,28 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
   if(getenv("MMX_BOSS_RUSH_AIR_VISUAL_TEST")) {rush_air_visual_trace();return;}
   if(getenv("MMX_BOSS_RUSH_VISUAL_TEST")) {rush_visual_checks(start,cap);return;}
   size_t baseline=RtlSaveSnapshotToMemory(start,cap);check(baseline!=0,"arena snapshot saves");
-  unsigned before=g_ram[0xbad]|g_ram[0xbae]<<8;
-  MmxCoopState before_coop=MmxCoopGetState();
-  unsigned partner_before=before_coop.players[1].body[5]|before_coop.players[1].body[6]<<8;
-  for(unsigned t=0;t<8;++t) frame(SNES_PAD_RIGHT|(coop_assets?SNES_PAD_LEFT<<12:0));
-  check((g_ram[0xbad]|g_ram[0xbae]<<8)>before,"player moves while bosses enter");
+  /* The new trigger leaves players at the right wall. Place this independent
+   * controller probe inside the room so wall/tether limits cannot mask input. */
+  eagle_putword(g_ram+0xbad,MmxBossRushGetState().camera_x+128);
   if(coop_assets) {
     MmxCoopState c=MmxCoopGetState();
-    check((c.players[1].body[5]|c.players[1].body[6]<<8)<partner_before,"partner uses port 2 while bosses enter");
+    for(unsigned i=0;i<2;++i)eagle_putword(c.players[i].body+5,MmxBossRushGetState().camera_x+128+i*64);
+    MmxCoopSetState(&c);memcpy(g_ram+0xba8,c.players[c.current].body,sizeof(c.players[c.current].body));
+  }
+  MmxCoopState before_coop=MmxCoopGetState();
+  unsigned before=eagle_word(coop_assets && before_coop.current!=0?
+      before_coop.players[0].body+5:g_ram+0xbad);
+  unsigned partner_before=eagle_word(before_coop.current==1?g_ram+0xbad:before_coop.players[1].body+5);
+  for(unsigned t=0;t<8;++t) frame(SNES_PAD_RIGHT|(coop_assets?SNES_PAD_LEFT<<12:0));
+  MmxCoopState after_coop=MmxCoopGetState();
+  unsigned after=eagle_word(coop_assets && after_coop.current!=0?
+      after_coop.players[0].body+5:g_ram+0xbad);
+  unsigned partner_after=eagle_word(after_coop.current==1?g_ram+0xbad:after_coop.players[1].body+5);
+  fprintf(stderr,"rush input probe projected=%u/%u p1=%04x/%04x p2=%04x/%04x\n",
+      before_coop.current,after_coop.current,before,after,partner_before,partner_after);
+  check(after>before,"player moves while bosses enter");
+  if(coop_assets) {
+    check(partner_after<partner_before,"partner uses port 2 while bosses enter");
   }
   check(RtlLoadSnapshotFromMemory(start,baseline),"restore arena after input check");
   for(unsigned a=0;a<8;++a) for(unsigned b=a+1;b<8;++b) {

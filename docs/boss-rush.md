@@ -31,14 +31,23 @@ Native title entry:
 
 ![Boss Rush selected on the native title menu](screenshots/boss-rush-title.png)
 
+The empty room remains available for preparation after entering the final door;
+the player walks to its right edge to begin:
+
+![Left side of the empty Mammoth chamber](screenshots/boss-rush-mammoth-preparation.png)
+
 Penguin and Mammoth in the factory arena, with Penguin's original ceiling mount
-and handle at the top center:
+and handle near the right wall:
 
 ![Mammoth arena with Penguin's ceiling mount and native boss meters](screenshots/boss-rush-mammoth-arena.png)
 
 The same arena in local co-op:
 
 ![X and Zero facing Penguin and Mammoth](screenshots/boss-rush-mammoth-coop.png)
+
+Penguin reaches and pulls his relocated native handle:
+
+![Penguin grabbing the handle near the right wall](screenshots/boss-rush-penguin-hook.png)
 
 Native font, final count, persistent high score and retry choices:
 
@@ -86,19 +95,24 @@ boss's child actors belong to its encounter; cleanup preserves the other
 boss, its children, and both players' projectiles.
 
 The run loads Flame Mammoth's last native checkpoint in the final door corridor.
-Players can prepare weapons there; crossing the door scrolls into the
-boss room and starts the encounter and boss music. Door, checkpoint and
+Players can prepare weapons there or inside the empty room. Crossing the door
+opens the full Mammoth chamber; reaching its far-right side starts both boss
+entrances and the battle music. Door, checkpoint and
 camera events remain active during preparation; stock stage enemies are
 filtered before allocation. Because Rush bypasses the stock boss's shared
 player intro, the encounter requests battle song `$1E` through the native dispatcher
-after the door releases; it uploads the SPC bank and supports the existing
+at the right-edge trigger; it uploads the SPC bank and supports the existing
 MSU1 hook. The call stays inside the guest scheduler so an upload can yield
 across frames. Its saved registers live on the guest stack and its pending
 return is snapshot-owned, with the existing state layout preserved.
 This matches Chill Penguin's health-fill controller at `$81:B617`; `$21`
 is the victory song and must not be used for the encounter.
 The room retains native scenery,
-metatile collision data and its fixed camera. Kuwanger
+metatile collision data and native scrolling camera. The room is 368 pixels wide:
+Mammoth's original `$87:9252` camera extension adds 112 pixels beyond the first
+screen. Rush opens that same range for every pair after the door releases,
+keeping the native gradual limits and player follow. The trigger is 48 pixels
+from the right wall. Replacements enter on the current screen. Kuwanger
 starts higher to finish his native downward entrance above that floor. Mammoth
 uses a fixed arrival position and bypasses the factory's player-distance gate;
 his native entrance animation and health-fill states still run.
@@ -108,8 +122,11 @@ it stationary. All eight X1 weapons and four shared Sub Tanks start full.
 
 Penguin's ceiling mount is reconstructed from his original room's layout,
 metatiles, graphics resource and palettes at ROM load. It draws at the top
-center without replacing the factory's VRAM or collision. His original handle
-child actor still spawns and animates with Penguin, then leaves with his encounter.
+right side without replacing the factory's VRAM or collision. Its right edge
+leaves 48 pixels before the wall, clear of the boss meters on the final screen.
+His original handle child actor and native jump/landing targets share the same
+world position, so scrolling cannot detach the handle from the mount. The handle
+still animates with Penguin and leaves with his encounter.
 
 The title entry uses the native BG3 font and selection palettes. Navigation
 wraps through all four rows with Up, Down or Select. Returning through Main Menu
