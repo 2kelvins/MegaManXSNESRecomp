@@ -97,7 +97,10 @@ starts higher to finish his native downward entrance above that floor. Mammoth
 uses a fixed arrival position and bypasses the factory's player-distance gate;
 his native entrance animation and health-fill states still run.
 
-The title entry uses the native BG3 font and selection palettes. Confirmation
+The title entry uses the native BG3 font and selection palettes. Navigation
+wraps through all four rows with Up, Down or Select. Returning through Main Menu
+retires the stage's auxiliary tasks and replays the complete native logo opening,
+including its title music, before showing the menu again. Confirmation
 plays the native mini charged shot on the selected fourth row before the fade;
 held confirmation buttons are consumed until released so they do not fire
 again after arrival. Boss meters
@@ -180,6 +183,9 @@ set `MMX_BOSS_RUSH_TEST=1` and pass the verified USA ROM to run the title-menu,
 28-pair entrance, replacement, 600-frame combat and snapshot-replay checks in
 an empty private working directory. Add `MMX_BOSS_RUSH_COOP=<private Zero asset
 file>` to run those checks in local co-op, including one-player and team deaths.
+`MMX_BOSS_RUSH_MENU_TEST=1` selects a shorter regression that checks Up, Down
+and Select from every title row, then returns through the full logo opening and
+verifies its music bank against the original ROM's title command.
 The same checks verify the native title projectile, second-door controller and
 actual boss music bank upload against the command in the original Penguin
 controller, then exercise Retry and Main Menu. If an upload

@@ -122,12 +122,26 @@ static void boss_hook(CpuState *cpu,uint32_t pc) {
     g_ram[0x1f81]=2;g_ram[0x1f82]=0;
   }
   if(at==0x0094d9 && s.return_title) {
+    /* Retire the stage's auxiliary tasks before the opening installs its
+     * graphics/palette tasks. Otherwise a suspended stage upload resumes
+     * against the opening's reused scratch buffers. Keep our active task. */
+    for(unsigned slot=0;slot<0x70;slot+=0x10)
+      if(slot!=g_ram[0xa0]) g_ram[0x30+slot]=0;
     MmxBossRushReset();MmxCoopReset();
+    s=MmxBossRushGetState();s.return_title=1;MmxBossRushSetState(&s);
     memset(g_ram+0xd1,0,4);
-    memset(g_ram+0x38,0,5);g_ram[0x38]=2;
-    /* Resume the title loop with its menu state selected, bypassing the
-     * startup attract screen that waits for an extra Start press. */
+    memset(g_ram+0xac,0,4); /* Consume the results confirmation before intro skip. */
+    memset(g_ram+0x38,0,5);g_ram[0x39]=4;
+    /* The native logo opening ($8CE1) resets the scene, loads its art and
+     * requests title music before the logo flies in. Select that opening
+     * through its normal loop, without replaying the startup gameplay demo. */
     interp_bridge_pre_opcode_redirect((pc&0xff0000)|0x8c56);return;
+  }
+  if(at==0x008c56 && s.return_title && (g_ram[0x38]==2 || g_ram[0x39]==6)) {
+    /* After the complete logo sequence, show the requested menu rather
+     * than starting the native attract demo. Start can still skip the intro. */
+    if(g_ram[0x39]==6) {g_ram[0x38]=2;memset(g_ram+0x39,0,4);}
+    s.return_title=0;MmxBossRushSetState(&s);return;
   }
   if(at==0x0094d9 && s.mode==MMX_RUSH_LOADING && !s.stage_started) {
     g_ram[0xd1]=2;g_ram[0xd2]=2;g_ram[0xd3]=g_ram[0xd4]=0;
@@ -254,7 +268,7 @@ void MmxBossRushHostFrame(void) {
   for(unsigned i=0;i<sizeof(actors)/sizeof(*actors);++i)
     registered&=interp_bridge_add_pre_opcode_hook(actors[i],actor_hook);
   const unsigned bosses[]={0x849feb,0x84a003,0x84aadd,0x84a677,0x849b03,0x849b43,
-    0x848fca,0x848fad,0x9ac7,0xdc36,0xdd47,0xd1ed,0x94d9,0xe68e,0x879258,0x879276,0x8088d6,0x849f19,0x849f2a,0x849f2f,0x849f7e,
+    0x848fca,0x848fad,0x9ac7,0xdc36,0xdd47,0xd1ed,0x94d9,0x8c56,0xe68e,0x879258,0x879276,0x8088d6,0x849f19,0x849f2a,0x849f2f,0x849f7e,
     0x8885b5,0x888dab,0x888e0f,0x888d79,0x888d2f,0x888d5e,0x88876a,0x828297,0x82829d,0x83b192};
   for(unsigned i=0;i<sizeof(bosses)/sizeof(*bosses);++i)
     registered&=interp_bridge_add_pre_opcode_hook(bosses[i],boss_hook);
@@ -353,11 +367,20 @@ void MmxBossRushFrame(uint8_t *r,uint16_t input) {
     if(s.menu==2) s.selection=3;
     s.menu=1;
     if(s.selection!=3) s.selection=(uint8_t)((word(r+0xbb0)-166)/16);
-    if(s.selection==2 && (pressed&SNES_PAD_DOWN)) s.selection=3;
-    if(s.selection==3) {
-      memset(r+0xac,0,4);put(r+0xbb0,214);
-      if(pressed&SNES_PAD_UP) {s.selection=2;put(r+0xbb0,198);}
-      else if(pressed&(SNES_PAD_START|SNES_PAD_A|SNES_PAD_Y)) {
+    unsigned previous=s.selection;
+    if(pressed&SNES_PAD_UP) {
+      if(previous==0) s.selection=3;
+      else if(previous==3) s.selection=2;
+    } else if(pressed&(SNES_PAD_DOWN|SNES_PAD_SELECT)) {
+      if(previous==2) s.selection=3;
+      else if(previous==3) s.selection=0;
+    }
+    if(previous==3 || s.selection==3) {
+      /* The native cursor table has three rows. Handle transitions touching
+       * our fourth row here, and synchronize its index when leaving it. */
+      memset(r+0xac,0,4);r[0x3c]=s.selection==3?2:s.selection;
+      put(r+0xbb0,166+16*s.selection);
+      if(s.selection==3 && (pressed&(SNES_PAD_START|SNES_PAD_A|SNES_PAD_Y))) {
         MmxBossRushSetState(&s);load(r,MmxCoopEnabled());return;
       }
     }

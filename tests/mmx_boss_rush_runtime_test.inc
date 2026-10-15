@@ -12,6 +12,44 @@ static void rush_keep_players_alive(void) {
   }
 }
 static unsigned rush_death_sounds;
+static void rush_title_navigation_checks(uint8_t *snapshot,size_t cap) {
+  size_t saved=RtlSaveSnapshotToMemory(snapshot,cap);check(saved,"title navigation baseline saves");
+  for(unsigned row=0;row<4;++row) for(unsigned direction=0;direction<3;++direction) {
+    check(RtlLoadSnapshotFromMemory(snapshot,saved),"title navigation baseline restores");
+    for(unsigned step=0;step<row;++step) {frame(SNES_PAD_DOWN);zero_replay(12);}
+    check(MmxBossRushGetState().selection==row,"native input reaches each of the four title rows");
+    unsigned key=direction==2?SNES_PAD_SELECT:direction?SNES_PAD_DOWN:SNES_PAD_UP;
+    unsigned expected=(row+(direction?1:3))%4;
+    frame(key);zero_replay(12);
+    fprintf(stderr,"title navigation row=%u direction=%s selected=%u expected=%u native=%u y=%u\n",
+        row,direction==2?"select":direction?"down":"up",MmxBossRushGetState().selection,expected,g_ram[0x3c],eagle_word(g_ram+0xbb0));
+    check(MmxBossRushGetState().selection==expected && eagle_word(g_ram+0xbb0)==166+16*expected,
+        "both title navigation directions wrap over all four choices");
+  }
+  check(RtlLoadSnapshotFromMemory(snapshot,saved),"title cursor restores after navigation checks");
+  puts("MMX BOSS RUSH TITLE NAVIGATION CHECKS PASSED");
+}
+static void rush_return_title_checks(void) {
+  MmxBossRushFinish();frame(0);frame(SNES_PAD_DOWN);frame(0);frame(SNES_PAD_START);frame(0);
+  const uint8_t *rom=g_snes->cart->rom;
+  check(rom[0xd8d]==0xa9 && rom[0xd8f]==0x20 && rom[0xd90]==0xb0 && rom[0xd91]==0x87,
+      "retail opening supplies the native title music command");
+  unsigned song=rom[0xd8e],bank=rom[0x3007b+rom[0x3006b+song]];
+  bool opening=false,title_music=false;
+  for(unsigned t=0;t<1800 && !MmxBossRushGetState().menu;++t) {
+    frame(0);
+    opening|=g_ram[0xd1]==0 && g_ram[0x38]==0 && g_ram[0x39]!=0;
+    title_music|=g_ram[0xfffd]==bank;
+    if(t==240) check(MmxRendererSaveCapture("rush-return-opening.cap"),"return opening capture saves");
+  }
+  fprintf(stderr,"return title opening=%u music=%u bank=%02x expected=%02x state=%u/%u/%u menu=%u\n",
+      opening,title_music,g_ram[0xfffd],bank,g_ram[0x38],g_ram[0x39],g_ram[0x3a],MmxBossRushGetState().menu);
+  check(opening,"Main Menu restarts the full native opening before the logo flies in");
+  check(title_music,"native opening replaces the boss song with the original title music");
+  check(MmxBossRushGetState().mode==MMX_RUSH_OFF && MmxBossRushGetState().menu==1,
+      "native opening returns to all four title choices");
+  puts("MMX BOSS RUSH RETURN TITLE CHECKS PASSED");
+}
 static uint8_t rush_extension_value;
 static void rush_extension_reset(uint8_t *ram) {(void)ram;rush_extension_value=0;}
 static void rush_extension_save(uint8_t out[]) {out[0]='R';out[1]=rush_extension_value;}
@@ -604,6 +642,7 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
   }
   check(MmxBossRushGetState().menu==1,"Boss Rush appears on the native title menu");
   zero_replay(180);
+  if(getenv("MMX_BOSS_RUSH_MENU_TEST")) rush_title_navigation_checks(start,cap);
   for(unsigned n=0;n<3;++n) {frame(SNES_PAD_DOWN);zero_replay(12);}
   check(MmxBossRushGetState().selection==3,"fourth title option is navigable");
   check(MmxRendererSaveCapture("rush-title.cap"),"fourth title entry capture saves");
@@ -680,6 +719,7 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
   check(g_ram[0xfffd]==boss_bank && g_ram[0xfffd]!=stage_bank,
       "native boss music bank replaces the stage bank");
   check(MmxBossRushGetState().mode==MMX_RUSH_PLAYING,"crossing the second door starts the encounter");
+  if(getenv("MMX_BOSS_RUSH_MENU_TEST")) {rush_return_title_checks();return;}
   if(getenv("MMX_BOSS_RUSH_STATE_FORMAT_TEST")) {rush_state_format_checks(start,expected,actual,cap);return;}
   if(getenv("MMX_BOSS_RUSH_AUDIO_TEST")) {rush_audio_checks(start,cap);return;}
   if(getenv("MMX_BOSS_RUSH_DEATH_TEST")) {rush_natural_death_checks();return;}
@@ -812,9 +852,6 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
   frame(0);frame(SNES_PAD_START);frame(0);
   for(unsigned t=0;t<1800 && MmxBossRushGetState().mode==MMX_RUSH_LOADING;++t) frame(0);
   check(MmxBossRushGetState().mode==MMX_RUSH_PREPARING && !MmxBossRushGetState().defeated,"Retry returns to preparation with a new full run");
-  MmxBossRushFinish();frame(0);frame(SNES_PAD_DOWN);frame(0);frame(SNES_PAD_START);frame(0);
-  for(unsigned t=0;t<1800 && !MmxBossRushGetState().menu;++t) frame(0);
-  fprintf(stderr,"rush return mode=%u menu=%u pending=%u game=%u/%u/%u title=%u/%u xy=%u,%u\n",MmxBossRushGetState().mode,MmxBossRushGetState().menu,MmxBossRushGetState().return_title,g_ram[0xd1],g_ram[0xd2],g_ram[0xd3],g_ram[0x38],g_ram[0x39],g_ram[0xbad]|g_ram[0xbae]<<8,g_ram[0xbb0]|g_ram[0xbb1]<<8);
-  check(MmxBossRushGetState().mode==MMX_RUSH_OFF && MmxBossRushGetState().menu==1,"results return to the native title menu");
+  rush_return_title_checks();
   puts("MMX BOSS RUSH ROM CHECKS PASSED (28 distinct pairs)");
 }
