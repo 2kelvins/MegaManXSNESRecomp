@@ -21,6 +21,7 @@
 extern uint8_t g_ram[0x20000];
 static unsigned word(const uint8_t *p) {return p[0]|p[1]<<8;}
 static void put(uint8_t *p,unsigned v) {p[0]=(uint8_t)v;p[1]=(uint8_t)(v>>8);}
+static unsigned entry_x(const uint8_t *r,unsigned seat) {return word(r+0x1e4d)+64+seat*128;}
 static void stack_push(CpuState *cpu,unsigned v,unsigned bytes) {
   while(bytes) {cpu_write8(cpu,0,cpu->S,(uint8_t)(v>>(--bytes*8)));--cpu->S;}
 }
@@ -29,9 +30,9 @@ static unsigned stack_pop(CpuState *cpu,unsigned bytes) {
   return v;
 }
 static bool arena_ready(const uint8_t *r) {
-  /* Reach the expanded room's right side before requesting music and
-   * releasing either boss seat. */
-  unsigned right=r[0x1f7a]==4?0x1e00+MMX_RUSH_MAMMOTH_SCROLL+208:0x1e20;
+  /* Start beneath the room's central hook, with the native follow camera
+   * framing the player near the middle and an entrance on either side. */
+  unsigned right=r[0x1f7a]==4?0x1e00+MMX_RUSH_ARENA_CENTER_X:0x1e20;
   return word(r+0x1e4d)>=0x1e00 && word(r+0xbad)>=right &&
       r[0xbaa]!=0x1a && r[0xbaa]!=0x18 && !r[0xc16];
 }
@@ -186,7 +187,7 @@ static void boss_hook(CpuState *cpu,uint32_t pc) {
     bool body=s.bosses[owner].object==cpu->D;
     if((body && (at==0x01b7bf || at==0x01b81b)) ||
         (!body && at==0x07efd2 && g_ram[cpu->D+10]==0x12)) {
-      unsigned origin=s.camera_x+MMX_RUSH_MAMMOTH_SCROLL+MMX_RUSH_HOOK_SCREEN_X-128;
+      unsigned origin=s.camera_x+MMX_RUSH_ARENA_CENTER_X-128;
       unsigned value=at==0x01b81b?cpu->A-word(g_ram+0x1e60)+origin:origin;
       cpu->A=(uint16_t)value;cpu->_flag_Z=!cpu->A;cpu->_flag_N=cpu->A>>15;
       cpu->P=(cpu->P&~0x82u)|(cpu->_flag_Z?2:0)|(cpu->_flag_N?128:0);
@@ -243,7 +244,13 @@ static void boss_hook(CpuState *cpu,uint32_t pc) {
       /* The room has already been opened for every pair. His stock intro
        * must not add $70 again to its private movement boundary. */
       if(g_ram[0x1f7a]==4) put(g_ram+0x1e60,s.camera_x+MMX_RUSH_MAMMOTH_SCROLL);
-      put(g_ram+cpu->D+5,word(g_ram+0x1e4d)+144);put(g_ram+cpu->D+8,s.camera_y+160);
+      put(g_ram+cpu->D+8,s.camera_y+160);
+    }
+    if(at==0x07925e) {
+      /* Keep his assigned side after the stock arrival adds $40 to X. */
+      cpu->A=(uint16_t)entry_x(g_ram,(unsigned)owner);
+      cpu->_flag_Z=!cpu->A;cpu->_flag_N=cpu->A>>15;
+      cpu->P=(cpu->P&~0x82u)|(cpu->_flag_Z?2:0)|(cpu->_flag_N?128:0);
     }
     /* The factory waits for a player to walk under the entrance platform.
      * Rush starts his arrival on the visible screen after the run trigger. */
@@ -297,7 +304,7 @@ void MmxBossRushHostFrame(void) {
   const unsigned bosses[]={0x849feb,0x84a003,0x84aadd,0x84a677,0x849b03,0x849b43,
     0x848fca,0x848fad,0x9ac7,0xdc36,0xdd47,0xd1ed,0x94d9,0x8c56,0xe68e,0x879258,0x879276,0x8088d6,0x849f19,0x849f2a,0x849f2f,0x849f7e,
     0x8885b5,0x888dab,0x888e0f,0x888d79,0x888d2f,0x888d5e,0x88876a,0x828297,0x82829d,0x83b192,
-    0x8498ff,0x84990d,0x81b7bf,0x81b81b,0x87efd2};
+    0x8498ff,0x84990d,0x81b7bf,0x81b81b,0x87efd2,0x87925e};
   for(unsigned i=0;i<sizeof(bosses)/sizeof(*bosses);++i)
     registered&=interp_bridge_add_pre_opcode_hook(bosses[i],boss_hook);
   static bool warned;
@@ -470,7 +477,7 @@ void MmxBossRushFrame(uint8_t *r,uint16_t input) {
           s.bosses[i].globals[n]=r[globals[n]];
         MmxBossRushSetState(&s);
         memset(r+object,0,64);r[object]=0x81;r[object+10]=kMmxBossRushBosses[id].kind;
-        unsigned x=word(r+0x1e4d)+144+i*48,y=s.camera_y+(id==4?43:96);
+        unsigned x=entry_x(r,i),y=s.camera_y+(id==4?43:96);
         put(r+object+5,x);put(r+object+8,y);put(r+object+0x22,x);put(r+object+0x24,y);
       }
     }

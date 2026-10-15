@@ -927,7 +927,7 @@ static uint16_t background(const Ppu *p, const Raster *r, unsigned layer, int x,
   static const unsigned low[] = {8, 7, 1}, high[] = {12, 11, 3};
   if(stage && layer==0 && frame.ram[0x1f7a]==4 &&
       (frame_rush.mode==MMX_RUSH_PLAYING || frame_rush.mode==MMX_RUSH_PREPARING)) {
-    int hook_x=frame_rush.camera_x+MMX_RUSH_MAMMOTH_SCROLL+MMX_RUSH_HOOK_SCREEN_X;
+    int hook_x=frame_rush.camera_x+MMX_RUSH_ARENA_CENTER_X;
     int sx=x+view_camera(frame.ram,0x1e4d)-hook_x+32;
     int sy=y+view_camera(frame.ram,0x1e50)-(int)frame_rush.camera_y;
     int pixel=MmxRenderAssetsRushCeilingPixel((unsigned)sx,(unsigned)sy);

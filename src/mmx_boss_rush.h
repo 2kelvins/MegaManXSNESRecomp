@@ -7,9 +7,10 @@ enum { MMX_RUSH_OFF, MMX_RUSH_LOADING, MMX_RUSH_PLAYING, MMX_RUSH_FINISHED,
   MMX_RUSH_PREPARING };
 enum { MMX_RUSH_EMPTY, MMX_RUSH_ENTERING, MMX_RUSH_FIGHTING, MMX_RUSH_DYING };
 enum { MMX_RUSH_NOT_LOADED, MMX_RUSH_ARENA_LOADED, MMX_RUSH_MUSIC_PENDING };
-/* $87:9252 opens Mammoth's camera another $70 pixels. Keep that full room
- * for every pair; the graft's right edge leaves 48 pixels for the boss HUD. */
-enum { MMX_RUSH_MAMMOTH_SCROLL=0x70, MMX_RUSH_HOOK_SCREEN_X=176 };
+/* $87:9252 opens Mammoth's camera another $70 pixels. The encounter trigger
+ * and Penguin's hook share the center of the full 368-pixel chamber. */
+enum { MMX_RUSH_MAMMOTH_SCROLL=0x70,
+  MMX_RUSH_ARENA_CENTER_X=(256+MMX_RUSH_MAMMOTH_SCROLL)/2 };
 typedef struct MmxBossRushBoss {
   uint16_t object, ticks;
   uint8_t id, phase, health, reserved;

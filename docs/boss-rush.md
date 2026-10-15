@@ -32,12 +32,12 @@ Native title entry:
 ![Boss Rush selected on the native title menu](screenshots/boss-rush-title.png)
 
 The empty room remains available for preparation after entering the final door;
-the player walks to its right edge to begin:
+the player walks to the center of the full room to begin:
 
 ![Left side of the empty Mammoth chamber](screenshots/boss-rush-mammoth-preparation.png)
 
 Penguin and Mammoth in the factory arena, with Penguin's original ceiling mount
-and handle near the right wall:
+and handle centered across the full room:
 
 ![Mammoth arena with Penguin's ceiling mount and native boss meters](screenshots/boss-rush-mammoth-arena.png)
 
@@ -47,7 +47,16 @@ The same arena in local co-op:
 
 Penguin reaches and pulls his relocated native handle:
 
-![Penguin grabbing the handle near the right wall](screenshots/boss-rush-penguin-hook.png)
+![Penguin grabbing the handle at the room's center](screenshots/boss-rush-penguin-hook.png)
+
+Eagle-to-Chameleon replacements in either boss slot, with Chameleon's normal
+palette restored. These native fixtures check body coordinates throughout the
+replacement and combat; the reported persistent-invisibility case has not yet
+been reproduced.
+
+![Chameleon visible after replacing the left boss](screenshots/boss-rush-chameleon-replacement-left.png)
+
+![Chameleon visible after replacing the right boss](screenshots/boss-rush-chameleon-replacement-right.png)
 
 Native font, final count, persistent high score and retry choices:
 
@@ -96,12 +105,12 @@ boss, its children, and both players' projectiles.
 
 The run loads Flame Mammoth's last native checkpoint in the final door corridor.
 Players can prepare weapons there or inside the empty room. Crossing the door
-opens the full Mammoth chamber; reaching its far-right side starts both boss
+opens the full Mammoth chamber; reaching its center starts both boss
 entrances and the battle music. Door, checkpoint and
 camera events remain active during preparation; stock stage enemies are
 filtered before allocation. Because Rush bypasses the stock boss's shared
 player intro, the encounter requests battle song `$1E` through the native dispatcher
-at the right-edge trigger; it uploads the SPC bank and supports the existing
+at the central trigger; it uploads the SPC bank and supports the existing
 MSU1 hook. The call stays inside the guest scheduler so an upload can yield
 across frames. Its saved registers live on the guest stack and its pending
 return is snapshot-owned, with the existing state layout preserved.
@@ -111,10 +120,12 @@ The room retains native scenery,
 metatile collision data and native scrolling camera. The room is 368 pixels wide:
 Mammoth's original `$87:9252` camera extension adds 112 pixels beyond the first
 screen. Rush opens that same range for every pair after the door releases,
-keeping the native gradual limits and player follow. The trigger is 48 pixels
-from the right wall. Replacements enter on the current screen. Kuwanger
+keeping the native gradual limits and player follow. The trigger is 184 pixels
+from the left wall, with the player near the middle of the view. The two
+entrances start at screen X=64 and X=192, on either side of the player.
+Replacements enter on the current screen. Kuwanger
 starts higher to finish his native downward entrance above that floor. Mammoth
-uses a fixed arrival position and bypasses the factory's player-distance gate;
+uses his assigned entrance side and bypasses the factory's player-distance gate;
 his native entrance animation and health-fill states still run.
 The conveyor carries players only while a living Mammoth is present, and its
 palette animation stops with the carry. Preparation and other boss pairs leave
@@ -122,8 +133,7 @@ it stationary. All eight X1 weapons and four shared Sub Tanks start full.
 
 Penguin's ceiling mount is reconstructed from his original room's layout,
 metatiles, graphics resource and palettes at ROM load. It draws at the top
-right side without replacing the factory's VRAM or collision. Its right edge
-leaves 48 pixels before the wall, clear of the boss meters on the final screen.
+center of the entire 368-pixel room without replacing the factory's VRAM or collision.
 His original handle child actor and native jump/landing targets share the same
 world position, so scrolling cannot detach the handle from the mount. The handle
 still animates with Penguin and leaves with his encounter.
@@ -217,6 +227,13 @@ file>` to run those checks in local co-op, including one-player and team deaths.
 `MMX_BOSS_RUSH_MENU_TEST=1` selects a shorter regression that checks Up, Down
 and Select from every title row, then returns through the full logo opening and
 verifies its music bank against the original ROM's title command.
+`MMX_BOSS_RUSH_ARENA_TEST=1` checks the central trigger and visible entrance
+positions, both camera limits during combat, Penguin's actual handle grab,
+and native conveyor carry and stop behavior. `MMX_BOSS_RUSH_CHAMELEON_TEST=1`
+replaces Eagle with Chameleon in each boss slot, follows 1,800 frames of each
+replacement, checks full-room body bounds and restored colors, and captures a
+frame with his body inside the current view. Both fixtures support the same
+solo/local co-op settings as the full suite.
 The same checks verify the native title projectile, second-door controller and
 actual boss music bank upload against the command in the original Penguin
 controller, then exercise Retry and Main Menu. If an upload

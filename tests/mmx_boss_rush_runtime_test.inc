@@ -17,9 +17,9 @@ static void rush_scrolling_checks(uint8_t *snapshot,size_t cap) {
   MmxBossRushState s=MmxBossRushGetState();unsigned hook=0;
   for(unsigned d=0x1628;d<0x1928;d+=48)
     if(g_ram[d] && g_ram[d+10]==0x12 && MmxBossRushOwner(d)==0) hook=d;
-  unsigned hook_x=s.camera_x+MMX_RUSH_MAMMOTH_SCROLL+MMX_RUSH_HOOK_SCREEN_X;
+  unsigned hook_x=s.camera_x+MMX_RUSH_ARENA_CENTER_X;
   check(hook && eagle_word(g_ram+hook+5)==hook_x,
-      "Penguin's native handle aligns with the mount near the right wall");
+      "Penguin's native handle aligns with the mount at the full room's center");
   unsigned body=s.bosses[0].object;
   g_ram[body+1]=4;g_ram[body+2]=2;g_ram[body+3]=0;
   bool pulled=false;
@@ -34,7 +34,7 @@ static void rush_scrolling_checks(uint8_t *snapshot,size_t cap) {
   check(pulled,"Penguin's native jump reaches and pulls the relocated handle");
   check(abs((int)eagle_word(g_ram+body+5)-(int)hook_x)<=12,
       "Penguin's grabbing pose stays beside the relocated handle");
-  check(MmxRendererSaveCapture("rush-penguin-hook.cap"),"native right-side handle pull capture saves");
+  check(MmxRendererSaveCapture("rush-penguin-hook.cap"),"native centered handle pull capture saves");
   check(RtlLoadSnapshotFromMemory(snapshot,n),"encounter restores after handle check");
   unsigned right=eagle_word(g_ram+0x1e58),left=eagle_word(g_ram+0x1e56);
   check(right-left==MMX_RUSH_MAMMOTH_SCROLL,"combat keeps the original Mammoth scroll range");
@@ -247,6 +247,43 @@ static void rush_replacement_menu_checks(uint8_t *start,uint8_t *expected,size_t
     check(g_ram[object+0x35]==(art->attributes&14),"Armadillo normal palette survives snapshot restore");
   }
   puts("MMX BOSS RUSH REPLACEMENT PALETTE CHECKS PASSED");
+}
+static void rush_chameleon_replacement_checks(uint8_t *snapshot,size_t cap) {
+  size_t n=RtlSaveSnapshotToMemory(snapshot,cap);check(n,"Chameleon replacement baseline saves");
+  for(unsigned seat=0;seat<2;++seat) {
+    check(RtlLoadSnapshotFromMemory(snapshot,n),"Chameleon replacement baseline restores");
+    MmxBossRushState s=MmxBossRushGetState();
+    s.queue[0]=seat?0:6;s.queue[1]=seat?6:0;s.queue[2]=5;s.queued=3;
+    check(MmxBossRushSetState(&s),"Eagle queues ahead of replacement Chameleon");
+    for(unsigned t=0;t<1500;++t) {
+      frame(0);rush_keep_players_alive();s=MmxBossRushGetState();
+      if(s.bosses[seat].phase==MMX_RUSH_FIGHTING) break;
+    }
+    check(s.bosses[seat].id==6 && s.bosses[seat].phase==MMX_RUSH_FIGHTING,"Eagle reaches native combat");
+    g_ram[s.bosses[seat].object+0x27]=0;frame(0);
+    unsigned visible=0;int min_x=65535,max_x=0,min_y=65535,max_y=0;
+    for(unsigned t=0;t<1800;++t) {
+      frame(0);rush_keep_players_alive();s=MmxBossRushGetState();
+      if(s.bosses[seat].id!=5 || !s.bosses[seat].phase) continue;
+      unsigned d=s.bosses[seat].object;
+      int x=(int)eagle_word(g_ram+d+5)-s.camera_x,y=(int)eagle_word(g_ram+d+8)-s.camera_y;
+      if(x<min_x)min_x=x;if(x>max_x)max_x=x;if(y<min_y)min_y=y;if(y>max_y)max_y=y;
+      MmxBossRushVisualState v=MmxBossRushVisualGetState();
+      const MmxSpriteAsset *art=MmxRenderAssetsRushSprite(2,0x23);
+      if(s.bosses[seat].phase==MMX_RUSH_FIGHTING && v.initialized[seat] && art &&
+          !memcmp(v.colors[seat],art->colors,sizeof(art->colors)) &&
+          (int)eagle_word(g_ram+d+5)-(int)eagle_word(g_ram+0x1e4d)>=24 &&
+          (int)eagle_word(g_ram+d+5)-(int)eagle_word(g_ram+0x1e4d)<=232) {
+        if(!visible) {char path[80];snprintf(path,sizeof(path),"rush-chameleon-replacement-%u.cap",seat);check(MmxRendererSaveCapture(path),"visible replacement Chameleon capture saves");}
+        ++visible;
+      }
+    }
+    fprintf(stderr,"Chameleon replacement seat=%u visible-frames=%u bounds=%d,%d..%d,%d\n",seat,visible,min_x,min_y,max_x,max_y);
+    check(min_x>=16 && max_x<=352 && min_y>=16 && max_y<=208,
+        "replacement Chameleon's body stays within the full room");
+    check(visible>30,"replacement Chameleon appears inside the arena in either boss seat");
+  }
+  puts("MMX BOSS RUSH CHAMELEON REPLACEMENT CHECKS PASSED");
 }
 static void rush_visual_checks(uint8_t *snapshot,size_t cap) {
   MmxBossRushState s=MmxBossRushGetState();
@@ -781,7 +818,7 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
   zero_replay(180);
   check(MmxBossRushGetState().mode==MMX_RUSH_PREPARING &&
       !MmxBossRushGetState().bosses[0].phase && !MmxBossRushGetState().bosses[1].phase,
-      "preparation waits for the right-edge trigger before spawning bosses");
+      "preparation waits for the central trigger before spawning bosses");
   check(g_ram[0x1f9a]==32 && g_ram[0x1f99]==255,"run starts fully upgraded");
   for(unsigned i=0;i<4;++i) check((g_ram[0x1f83+i]&127)==28,"shared subtank starts full");
   for(unsigned i=0;i<8;++i) check(g_ram[0x1f88+i*2]==0xdc,"X1 weapon starts owned and full");
@@ -844,8 +881,11 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
       "native boss music bank replaces the stage bank");
   check(stopped_inside && furthest_camera>0x1e00,"walking through the arena scrolls beyond its first screen");
   check(MmxBossRushGetState().mode==MMX_RUSH_PLAYING &&
-      eagle_word(g_ram+0xbad)>=eagle_word(g_ram+0x1e58)+208,
-      "reaching the room's right edge starts the encounter");
+      eagle_word(g_ram+0xbad)>=MmxBossRushGetState().camera_x+MMX_RUSH_ARENA_CENTER_X,
+      "reaching the room's center starts the encounter");
+  int player_screen_x=(int)eagle_word(g_ram+0xbad)-(int)eagle_word(g_ram+0x1e4d);
+  check(player_screen_x>=104 && player_screen_x<=160,
+      "the encounter begins with the player near the middle of the view");
   if(getenv("MMX_BOSS_RUSH_ARENA_TEST")) {
     MmxBossRushState s=MmxBossRushGetState();
     memset(s.bosses,0,sizeof(s.bosses));memset(s.owner,0,sizeof(s.owner));
@@ -853,8 +893,22 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
     s.queue[0]=0;s.queue[1]=7;s.queued=8;
     for(unsigned i=1;i<7;++i)s.queue[i+1]=(uint8_t)i;
     check(MmxBossRushSetState(&s),"arena fixture selects Penguin and Mammoth");
+    bool framed=false;unsigned visible_frames=0;
     for(unsigned t=0;t<1500;++t) {
       frame(0);rush_keep_players_alive();s=MmxBossRushGetState();
+      if(s.bosses[0].object && s.bosses[1].object &&
+          g_ram[s.bosses[0].object+1]>=2 && g_ram[s.bosses[1].object+1]>=2 &&
+          g_ram[s.bosses[0].object+14] && g_ram[s.bosses[1].object+14]) ++visible_frames;
+      else visible_frames=0;
+      if(!framed && visible_frames>=3) {
+        for(unsigned i=0;i<2;++i) {
+          int x=(int)eagle_word(g_ram+s.bosses[i].object+5)-(int)eagle_word(g_ram+0x1e4d);
+          check(x>=32 && x<=224,"both boss introductions begin inside the visible arena");
+          check(i?x>player_screen_x:x<player_screen_x,"boss entrances flank the centered player");
+        }
+        check(MmxRendererSaveCapture("rush-mammoth-arena.cap"),"visible boss introductions capture saves");
+        framed=true;
+      }
       if(t%60==0) fprintf(stderr,"arena tick=%u defeated=%u bosses=%u:%u:%u/%u:%u:%u xy=%04x,%04x/%04x,%04x\n",
           t,s.defeated,s.bosses[0].id,s.bosses[0].phase,g_ram[s.bosses[0].object+1],
           s.bosses[1].id,s.bosses[1].phase,g_ram[s.bosses[1].object+1],
@@ -865,7 +919,7 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
     check(s.bosses[0].id==0 && s.bosses[1].id==7 && !s.defeated &&
         s.bosses[0].phase==MMX_RUSH_FIGHTING && s.bosses[1].phase==MMX_RUSH_FIGHTING,
         "Penguin and Mammoth complete entrances in the new arena");
-    check(MmxRendererSaveCapture("rush-mammoth-arena.cap"),"Mammoth arena capture saves");
+    check(framed,"both boss introductions were visible together before combat");
     rush_scrolling_checks(start,cap);
     rush_conveyor_checks(start,cap);
     for(unsigned t=0;t<7;++t) {frame(0);rush_keep_players_alive();}
@@ -902,6 +956,7 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
   if(getenv("MMX_BOSS_RUSH_AUDIO_TEST")) {rush_audio_checks(start,cap);return;}
   if(getenv("MMX_BOSS_RUSH_DEATH_TEST")) {rush_natural_death_checks();return;}
   if(getenv("MMX_BOSS_RUSH_HIT_VISUAL_TEST")) {rush_hit_visual_checks(start,expected,cap);return;}
+  if(getenv("MMX_BOSS_RUSH_CHAMELEON_TEST")) {rush_chameleon_replacement_checks(start,cap);return;}
   if(getenv("MMX_BOSS_RUSH_REPLACEMENT_VISUAL_TEST") || getenv("MMX_BOSS_RUSH_PAUSE_VISUAL_TEST")) {
     rush_replacement_menu_checks(start,expected,cap);return;
   }
@@ -909,8 +964,8 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
   if(getenv("MMX_BOSS_RUSH_AIR_VISUAL_TEST")) {rush_air_visual_trace();return;}
   if(getenv("MMX_BOSS_RUSH_VISUAL_TEST")) {rush_visual_checks(start,cap);return;}
   size_t baseline=RtlSaveSnapshotToMemory(start,cap);check(baseline!=0,"arena snapshot saves");
-  /* The new trigger leaves players at the right wall. Place this independent
-   * controller probe inside the room so wall/tether limits cannot mask input. */
+  /* Place this independent controller probe inside the room so
+   * wall/tether limits cannot mask input. */
   eagle_putword(g_ram+0xbad,MmxBossRushGetState().camera_x+128);
   if(coop_assets) {
     MmxCoopState c=MmxCoopGetState();
