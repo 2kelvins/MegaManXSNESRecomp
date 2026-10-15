@@ -36,6 +36,8 @@ def check_saber(args, work, env):
                                  "--no-launcher", "--script", str(folder / "route.script")], cwd=folder, env=current,
                                 stdout=log, stderr=subprocess.STDOUT, timeout=120)
     assert result.returncode == 0, (folder / "record.log").read_text(errors="replace")[-4000:]
+    assert "SEH CRASH" not in (folder / "record.log").read_text(errors="replace"), \
+        "SDL worker threads must be joined before host shutdown"
     capture = sorted(folder.glob("*.replay"))[-1]
     identities = {p.read_text().splitlines()[2] for p in folder.glob("*.replay")}
     assert len(identities) == 1, "source-ROM identity stays stable across character/collision changes"

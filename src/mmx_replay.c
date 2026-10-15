@@ -176,7 +176,7 @@ bool MmxReplayPlaying(void) { return playing; }
 bool MmxReplayFinished(void) { return finished; }
 bool MmxReplayFailed(void) { return failed; }
 const char *MmxReplayPath(void) { return path; }
-static void shutdown_recording(void) {
+void MmxReplayShutdown(void) {
   MmxReplayClose();
   const char *why=SnesReplayWriterDestroy(writer);writer=NULL;
   if(why && !failed)fprintf(stderr,"[mmx-replay] %s; capture stopped\n",why);
@@ -204,7 +204,7 @@ static bool init_stem(void) {
   char absolute[1024];
   if(!snesrecomp_abspath(folder,absolute,sizeof(absolute)))return false;
   snprintf(stem,sizeof(stem),"%s/mmx-replay-%s-%ld",absolute,stamp,(long)replay_pid());
-  atexit(shutdown_recording);
+  atexit(MmxReplayShutdown);
   return true;
 }
 static bool evict_segment(void) {
@@ -265,7 +265,7 @@ static bool start_segment(void) {
 bool MmxReplayPlayback(const char *name) {
   /* An explicit offline playback can read a capture made in this process.
    * Drain outside the recording frame loop before opening its files. */
-  shutdown_recording(); playing=true; finished=failed=playback_loaded=false;
+  MmxReplayShutdown(); playing=true; finished=failed=playback_loaded=false;
   playback_rom_verified=false;
   playback_checkpointed=false;playback_rows=0;
   if(!name || !snesrecomp_abspath(name,path,sizeof(path))) { error("invalid replay path"); return false; }
