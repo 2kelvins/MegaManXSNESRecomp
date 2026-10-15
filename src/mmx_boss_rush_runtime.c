@@ -399,6 +399,21 @@ static void camera(uint8_t *r) {
   put(r+0x1e5a,s.camera_y);put(r+0x1e5c,s.camera_y);
   put(r+0x1e5e,s.camera_x);put(r+0x1e60,s.camera_x);put(r+0x1e62,s.camera_y);
 }
+static bool drop_health(uint8_t *r,MmxBossRushState *s,const MmxBossRushBoss *b) {
+  for(unsigned d=0x1628;d<0x1928;d+=48) if(!r[d]) {
+    /* Retail item kind 2, parameter 0: large health with native drop physics,
+     * lifetime, collection and refill. Keep aerial/off-screen kills reachable. */
+    int x=b->death_x,y=b->death_y;
+    int right=256+(r[0x1f7a]==4?MMX_RUSH_MAMMOTH_SCROLL:0)-16;
+    if(x<16)x=16;if(x>right)x=right;
+    if(y<16)y=16;if(y>184)y=184;
+    memset(r+d,0,48);r[d]=1;r[d+10]=2;
+    s->owner[(d-0xe68)/32]=0;
+    put(r+d+5,s->camera_x+x);put(r+d+8,s->camera_y+y);
+    return true;
+  }
+  return false;
+}
 void MmxBossRushFrame(uint8_t *r,uint16_t input) {
 #if MMX_VARIANT_JP
   (void)r;(void)input;return;
@@ -460,6 +475,11 @@ void MmxBossRushFrame(uint8_t *r,uint16_t input) {
             unsigned n=(d-0xe68)/32;
             if(s.owner[n]==i+1) {memset(r+d,0,object_step(d));s.owner[n]=0;}
             d+=object_step(d);
+          }
+          /* Cleanup releases that boss's item slots first. If the shared
+           * native pool is full, retry without losing or duplicating its drop. */
+          if(!drop_health(r,&s,b)) {
+            b->ticks=48;MmxBossRushSetState(&s);continue;
           }
           memset(b,0,sizeof(*b));
         }

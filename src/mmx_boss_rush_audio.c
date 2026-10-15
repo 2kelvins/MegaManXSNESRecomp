@@ -9,7 +9,10 @@
 
 /* Commands observed in all 28 native boss pairs, including owned projectiles.
  * $0C is the repeated meter fill. Charge/stop, music and upload commands remain
- * native. $B1 wraps to the driver's null effect: it acknowledges normally and
+ * native. Keep legacy $11/$13 cues readable, but leave those shared impact
+ * and boss-hurt sounds on the native driver. Cached copies would overlap on
+ * sustained weapon hits instead of following its voice priorities/retriggers.
+ * $B1 wraps to the driver's null effect: it acknowledges normally and
  * leaves active voices alone ($048A..04B5, common SPC bank 0). */
 static const uint8_t commands[]={
   0x0e,0x11,0x13,0x1e,0x23,0x31,0x33,0x44,0x48,0x49,0x4a,0x4c,
@@ -133,7 +136,9 @@ void MmxBossRushAudioPrepare(const uint8_t *rom,size_t size) {
   if(!base) {fprintf(stderr,"[mmx-rush] native sound cache could not initialize\n");return;}
   unsigned cached=0;size_t bytes=0;
   for(unsigned i=0;i<sizeof(commands);++i) {
-    unsigned command=commands[i];clips[command]=render(base,command);
+    unsigned command=commands[i];
+    if(command==0x11 || command==0x13) continue;
+    clips[command]=render(base,command);
     if(clips[command].pcm) {++cached;bytes+=clips[command].frames*2*sizeof(int16_t);}
     else fprintf(stderr,"[mmx-rush] native effect $%02X could not be cached\n",command);
   }

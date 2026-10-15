@@ -1379,6 +1379,26 @@ static void rush_static_and_streamed_graphics(void) {
       assert(MmxRendererDraw(output,(MmxRenderView){256,0,4.0/3.0},false));
       assert(output[40*256+61]==(flash?0xffffffu:0xff0000u));
     }
+    /* The PPU repeats the previous OAM while pause suspends sprite building.
+     * Its private boss tiles must survive both the stage fade and menu gate. */
+    ram[0xe79]=0x29;ram[0x1f10]=ram[0xc3]=0;
+    put_word(0,60);put_word(2,40);put_word(0x18,0x9100);ram[0x1a]=0x8d;ram[0xf]=0x29;
+    ppu.oam[32]=0x283c;ppu.oam[33]=0x2900;
+    MmxRendererReset();MmxRendererObserveObject(ram,0xe68);
+    MmxRendererRecordPiece(ram,0);MmxRendererLatchSprites();
+    capture();assert(MmxRendererDraw(output,(MmxRenderView){256,0,4.0/3.0},false));
+    assert(output[40*256+61]==0xff0000u);
+    for(unsigned menu=0;menu<2;++menu) for(unsigned fade=0;fade<3;++fade) {
+      ram[0x1f10]=menu?6:0;ram[0xc3]=menu?128:0;
+      MmxRendererLatchSprites();capture();
+      assert(MmxRendererDraw(output,(MmxRenderView){256,0,4.0/3.0},false));
+      if(output[40*256+61]!=0xff0000u)fprintf(stderr,"rush fade seat=%u menu=%u frame=%u pixel=%06x pieces=%u fallback=%u\n",seat,menu,fade,output[40*256+61],MmxRendererGetStats().pieces,MmxRendererGetStats().fallback_lines);
+      assert(output[40*256+61]==0xff0000u);
+    }
+    ppu.oam[32]=0xe000;MmxRendererLatchSprites();capture();
+    assert(MmxRendererDraw(output,(MmxRenderView){256,0,4.0/3.0},false));
+    assert(output[40*256+61]==0); /* Native removal/blinking must still hide it. */
+    ram[0x1f10]=ram[0xc3]=0;
   }
   MmxBossRushReset();g_mmx_custom_renderer=false;MmxRendererSetRom(NULL,0);
 }

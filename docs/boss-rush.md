@@ -6,7 +6,9 @@ Co-op uses that mod's owner-supplied X3 assets.
 The arena starts with full health, all native X1 weapons, maximum health and
 armor, and four full **shared** Sub Tanks; Hadouken is not acquired. There are no automatic refills or
 revivals. Two different Mavericks remain present, with each defeated boss
-replaced after cleanup. A run ends when its last player dies.
+replaced after cleanup. Each defeated boss leaves one large native health
+pickup when its explosion ends. It heals its collector by eight points and
+uses the original pickup physics, lifetime and Sub Tank rules. A run ends when its last player dies.
 The native player death animation finishes before results appear.
 
 Select **Boss Rush** beneath **Option Mode**. Enable the launcher's existing
@@ -48,6 +50,14 @@ The same arena in local co-op:
 Penguin reaches and pulls his relocated native handle:
 
 ![Penguin grabbing the handle at the room's center](screenshots/boss-rush-penguin-hook.png)
+
+Each defeated boss leaves one large native health pickup after its explosion:
+
+![Large health pickup after a boss defeat](screenshots/boss-rush-health-drop.png)
+
+Private boss graphics remain intact through the native pause fades:
+
+![Boss sprites through pause and resume](screenshots/boss-rush-pause-transition.png)
 
 Eagle-to-Chameleon replacements in either boss slot, with Chameleon's normal
 palette restored. These native fixtures check body coordinates throughout the
@@ -158,8 +168,12 @@ ROM-derived cache files are distributed with the build.
 
 Boss attack sounds are rendered ahead of play using an isolated copy of the
 native SPC/DSP, loaded from the owner ROM's common banks `$00/$01/$02` and the
-battle instrument overlays `$42/$47`. All 31 observed boss/child attack effects
-are cached in process memory. The original driver assigns these effects to
+battle instrument overlays `$42/$47`. The 29 boss/child attack effects
+are cached in process memory. Shared projectile-impact `$11` and boss-hurt `$13`
+requests stay on the native sound driver, preserving its priorities and
+retrigger behavior during sustained attacks such as Storm Tornado. Private
+copies previously stacked those hits at full volume. Legacy snapshots containing
+either cue still load normally. The original driver assigns effects to
 three fixed voices with priorities: Kuwanger's boomerang `$5A` has lower
 priority than `$51`, so an overlapping request can be acknowledged and remain
 silent. Cached effects use the existing trusted-mod PCM mixer to overlap
@@ -386,6 +400,23 @@ native menu from the same combat snapshot with Rush disabled, and checks
 save/restore and returning to the arena. Run these fixtures with
 `MMX_BOSS_RUSH_REPLACEMENT_VISUAL_TEST=1` or
 `MMX_BOSS_RUSH_PAUSE_VISUAL_TEST=1`, alongside `MMX_BOSS_RUSH_TEST=1`.
+Pause fades also retain each boss's private sprite attribution while native
+OAM still displays it. A fade without a fresh expanded queue uses the retained
+native pieces; live OAM matching removes them when the game hides or replaces
+them. Private boss art remains available across the menu transition, while the
+menu's reused armor/player-preview slots keep their native rendering.
+`MMX_BOSS_RUSH_PAUSE_TRACE=1` saves opening and closing frames for visual review.
+
+`MMX_BOSS_RUSH_HIT_AUDIO_TEST=1` observes the actual native sound ring while
+Storm Tornado hits Mammoth in either boss slot, alongside the existing hit-flash
+and tentacle-cut checks. The audio fixture independently compares shared hit
+commands/panning against the native sound helper with Rush interception inactive.
+
+`MMX_BOSS_RUSH_DROP_TEST=1` checks simultaneous boss deaths, exactly one large
+health item per boss, native collection, and snapshot replay. When the native
+item pool is full, cleanup keeps that reward pending until a slot is free;
+it does not consume another boss or duplicate the pickup. Rewards from aerial
+or off-screen deaths are clamped inside the chamber so players can reach them.
 
 ## White armor remnants after death
 

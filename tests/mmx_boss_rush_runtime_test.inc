@@ -12,6 +12,16 @@ static void rush_keep_players_alive(void) {
   }
 }
 static unsigned rush_death_sounds;
+static void rush_visual_bmp(const char *path);
+static void rush_pause_frames(const char *prefix) {
+  for(unsigned t=0;t<90;++t) {
+    frame(0);
+    if(getenv("MMX_BOSS_RUSH_PAUSE_TRACE") && (t<30 || t%10==0)) {
+      char path[96];snprintf(path,sizeof(path),"rush-pause-%s-%02u.bmp",prefix,t);
+      rush_visual_bmp(path);
+    }
+  }
+}
 static void rush_scrolling_checks(uint8_t *snapshot,size_t cap) {
   size_t n=RtlSaveSnapshotToMemory(snapshot,cap);check(n,"scrolling encounter snapshot saves");
   MmxBossRushState s=MmxBossRushGetState();unsigned hook=0;
@@ -201,7 +211,7 @@ static void rush_replacement_menu_checks(uint8_t *start,uint8_t *expected,size_t
     check(MmxRendererDraw(native,(MmxRenderView){256,0,4.0/3.0},true),"native pause reference renders");
     check(MmxRendererSaveCapture("rush-pause-native-reference.cap"),"native pause reference saves");
     check(RtlLoadSnapshotFromMemory(start,n),"restore combat before Rush pause");
-    frame(SNES_PAD_START);zero_replay(90);
+    frame(SNES_PAD_START);rush_pause_frames("opening");
     fprintf(stderr,"pause camera native=%u,%u rush=%u,%u preview=%u:%u at=%u,%u visible=%u pose=%u gates=%u:%u/%u/%u/%u stage=%u\n",
         camera_x,camera_y,eagle_word(g_ram+0x1e4d),eagle_word(g_ram+0x1e50),
         g_ram[0x1988],g_ram[0x1989],eagle_word(g_ram+0x198d),eagle_word(g_ram+0x1990),
@@ -213,7 +223,7 @@ static void rush_replacement_menu_checks(uint8_t *start,uint8_t *expected,size_t
         !memcmp(native,paused,sizeof(native)),"Rush pause matches the native menu pixels including X's idle preview");
     size_t en=RtlSaveSnapshotToMemory(expected,cap);frame(0);
     check(RtlLoadSnapshotFromMemory(expected,en),"native pause camera snapshot restores");
-    frame(SNES_PAD_START);zero_replay(90);s=MmxBossRushGetState();
+    frame(SNES_PAD_START);rush_pause_frames("closing");s=MmxBossRushGetState();
     check(MmxWidePolicy_IsStageScene(g_ram) && eagle_word(g_ram+0x1e4d)>=s.camera_x &&
         eagle_word(g_ram+0x1e4d)<=s.camera_x+MMX_RUSH_MAMMOTH_SCROLL &&
         eagle_word(g_ram+0x1e58)-eagle_word(g_ram+0x1e56)==MMX_RUSH_MAMMOTH_SCROLL &&
@@ -247,6 +257,99 @@ static void rush_replacement_menu_checks(uint8_t *start,uint8_t *expected,size_t
     check(g_ram[object+0x35]==(art->attributes&14),"Armadillo normal palette survives snapshot restore");
   }
   puts("MMX BOSS RUSH REPLACEMENT PALETTE CHECKS PASSED");
+}
+static unsigned rush_large_health_items(void) {
+  unsigned count=0;
+  for(unsigned d=0x1628;d<0x1928;d+=48)
+    count+=g_ram[d] && g_ram[d+10]==2 && !(g_ram[d+11]&127) && MmxBossRushOwner(d)<0;
+  return count;
+}
+static void rush_drop_checks(uint8_t *start,uint8_t *expected,uint8_t *actual,size_t cap) {
+  MmxBossRushState s=MmxBossRushGetState();
+  static const uint8_t queue[]={0,7,1,3,2,4,5,6};
+  memcpy(s.queue,queue,sizeof(queue));s.queued=8;
+  check(MmxBossRushSetState(&s),"drop fixture selects Penguin and Mammoth");
+  for(unsigned t=0;t<1500;++t) {
+    frame(0);rush_keep_players_alive();s=MmxBossRushGetState();
+    if(s.bosses[0].phase==MMX_RUSH_FIGHTING && s.bosses[1].phase==MMX_RUSH_FIGHTING) break;
+  }
+  check(s.bosses[0].phase==MMX_RUSH_FIGHTING && s.bosses[1].phase==MMX_RUSH_FIGHTING,"drop fixture reaches native combat");
+  eagle_putword(g_ram+0xbad,s.camera_x+32);
+  if(MmxCoopEnabled()) {
+    MmxCoopState c=MmxCoopGetState();
+    for(unsigned i=0;i<2;++i)eagle_putword(c.players[i].body+5,s.camera_x+32+i*32);
+    MmxCoopSetState(&c);memcpy(g_ram+0xba8,c.players[c.current].body,sizeof(c.players[c.current].body));
+  }
+  for(unsigned i=0;i<2;++i) {
+    unsigned d=s.bosses[i].object;g_ram[d+0x27]=0;
+    eagle_putword(g_ram+d+5,s.camera_x+190+i*80);eagle_putword(g_ram+d+8,s.camera_y+100);
+  }
+  frame(0);s=MmxBossRushGetState();
+  check(s.defeated==2 && s.bosses[0].phase==MMX_RUSH_DYING && s.bosses[1].phase==MMX_RUSH_DYING,
+      "simultaneous native deaths count each boss once");
+  size_t n=RtlSaveSnapshotToMemory(start,cap);check(n,"pending boss drops save");
+  size_t drop_result=0;
+  for(unsigned replay=0;replay<2;++replay) {
+    if(replay)check(RtlLoadSnapshotFromMemory(start,n),"pending boss drops restore");
+    for(unsigned t=0;t<60;++t) {frame(0);rush_keep_players_alive();}
+    check(rush_large_health_items()==2,"each boss creates exactly one unowned large native health item");
+    if(!replay) {
+      check(MmxRendererSaveCapture("rush-health-drops.cap"),"two native health drops capture saves");
+      drop_result=RtlSaveSnapshotToMemory(expected,cap);check(drop_result,"boss drop result saves");
+    } else {
+      size_t an=RtlSaveSnapshotToMemory(actual,cap);
+      same(expected,drop_result,actual,an,"simultaneous health drops and replacement controllers replay exactly");
+    }
+  }
+  unsigned item=0;
+  for(unsigned d=0x1628;d<0x1928;d+=48)
+    if(g_ram[d] && g_ram[d+10]==2 && MmxBossRushOwner(d)<0) {item=d;break;}
+  check(item!=0,"large health item is available to collect");
+  if(MmxCoopEnabled()) {
+    MmxCoopCapture(g_ram);MmxCoopState c=MmxCoopGetState();
+    for(unsigned i=0;i<2;++i) {
+      unsigned hp=i?20:8;
+      c.players[i].body[0x27]=(uint8_t)(128|hp);c.players[i].body[0x2b]=120;
+      c.players[i].body[2]=c.players[i].body[3]=0;
+      c.players[i].zero.hp[c.players[i].zero.active_x]=(uint8_t)hp;
+      eagle_putword(c.players[i].body+5,i?s.camera_x+32:eagle_word(g_ram+item+5));
+      eagle_putword(c.players[i].body+8,eagle_word(g_ram+item+8)+16);
+    }
+    MmxCoopSetState(&c);memcpy(g_ram+0xba8,c.players[c.current].body,sizeof(c.players[c.current].body));
+  } else {
+    g_ram[0xbcf]=0x88;g_ram[0xbd3]=120;g_ram[0xbaa]=g_ram[0xbab]=0;
+    eagle_putword(g_ram+0xbad,eagle_word(g_ram+item+5));eagle_putword(g_ram+0xbb0,eagle_word(g_ram+item+8)+16);
+    MmxZeroState z=MmxZeroGetState();z.hp[z.active_x]=8;MmxZeroSetState(z);
+  }
+  zero_replay(90);
+  MmxCoopState c=MmxCoopGetState();
+  unsigned hp=MmxCoopEnabled()?c.players[0].body[0x27]&127:g_ram[0xbcf]&127;
+  fprintf(stderr,"boss drop collection hp=%u partner=%u item=%u\n",hp,c.players[1].body[0x27]&127,g_ram[item]);
+  check(!g_ram[item] && hp==16,"native large health drop heals its collector by eight");
+  if(MmxCoopEnabled())check((c.players[1].body[0x27]&127)==20,"one shared pickup heals only the native collector");
+  check(RtlLoadSnapshotFromMemory(start,n),"pool pressure fixture restores pending deaths");
+  s=MmxBossRushGetState();
+  for(unsigned d=0x1628;d<0x1928;d+=48) {
+    memset(g_ram+d,0,48);g_ram[d]=1;g_ram[d+10]=2;s.owner[(d-0xe68)/32]=0;
+  }
+  for(unsigned i=0;i<2;++i) {s.bosses[i].ticks=47;s.bosses[i].death_x=i?600:-100;s.bosses[i].death_y=i?300:-100;}
+  check(MmxBossRushSetState(&s),"full native item pool installs");MmxBossRushFrame(g_ram,0);
+  s=MmxBossRushGetState();
+  check(s.bosses[0].phase==MMX_RUSH_DYING && s.bosses[1].phase==MMX_RUSH_DYING,
+      "a full item pool keeps both rewards pending without consuming a new boss");
+  memset(g_ram+0x1628,0,48);MmxBossRushFrame(g_ram,0);s=MmxBossRushGetState();
+  check(s.bosses[0].phase==MMX_RUSH_ENTERING && s.bosses[1].phase==MMX_RUSH_DYING &&
+      eagle_word(g_ram+0x162d)==s.camera_x+16 && eagle_word(g_ram+0x1630)==s.camera_y+16,
+      "one freed slot releases one reward and clamps an off-screen death into the arena");
+  memset(g_ram+0x1658,0,48);n=RtlSaveSnapshotToMemory(start,cap);
+  MmxBossRushFrame(g_ram,0);size_t en=RtlSaveSnapshotToMemory(expected,cap);
+  check(RtlLoadSnapshotFromMemory(start,n),"last pending reward snapshot restores");
+  MmxBossRushFrame(g_ram,0);size_t an=RtlSaveSnapshotToMemory(actual,cap);
+  same(expected,en,actual,an,"pool-full reward retry replays exactly without duplicate drops");
+  s=MmxBossRushGetState();
+  check(s.bosses[1].phase==MMX_RUSH_ENTERING && eagle_word(g_ram+0x165d)==s.camera_x+352 &&
+      eagle_word(g_ram+0x1660)==s.camera_y+184,"second reward stays reachable at the arena's opposite edge");
+  puts("MMX BOSS RUSH NATIVE HEALTH DROP CHECKS PASSED");
 }
 static void rush_chameleon_replacement_checks(uint8_t *snapshot,size_t cap) {
   size_t n=RtlSaveSnapshotToMemory(snapshot,cap);check(n,"Chameleon replacement baseline saves");
@@ -482,6 +585,13 @@ static void rush_forced_visual_checks(uint8_t *snapshot,size_t cap) {
   }
   fclose(log);puts("MMX BOSS RUSH FORCED VISUAL CONTROLLERS COMPLETE");
 }
+static unsigned rush_hit_sound_owner,rush_hit_sounds[2];
+static void rush_hit_sound_hook(CpuState *cpu,uint32_t pc) {
+  (void)pc;
+  if(MmxBossRushOwner(cpu->D)!=(int)rush_hit_sound_owner) return;
+  if((cpu->A&255)==0x11) ++rush_hit_sounds[0];
+  if((cpu->A&255)==0x13) ++rush_hit_sounds[1];
+}
 static void rush_hit_visual_checks(uint8_t *arena,uint8_t *pair,size_t cap) {
   size_t baseline=RtlSaveSnapshotToMemory(arena,cap);
   check(baseline!=0,"hit fixture saves empty arena");
@@ -502,6 +612,10 @@ static void rush_hit_visual_checks(uint8_t *arena,uint8_t *pair,size_t cap) {
     for(unsigned seat=0;seat<2;++seat) for(unsigned cut=0;cut<2;++cut) {
       unsigned boss=seat==order?3:7,weapon=cut?7:boss==3?3:5;
       check(RtlLoadSnapshotFromMemory(pair,saved),"each weapon restores undamaged bosses");
+      if(getenv("MMX_BOSS_RUSH_HIT_AUDIO_TEST")) {
+        rush_hit_sound_owner=seat;memset(rush_hit_sounds,0,sizeof(rush_hit_sounds));
+        check(interp_bridge_add_pre_opcode_hook(0x8088d9,rush_hit_sound_hook),"native sound-ring observer installs after the Rush audio hook");
+      }
       s=MmxBossRushGetState();unsigned body=s.bosses[seat].object;
       const MmxSpriteAsset *base=MmxRenderAssetsRushSprite(kMmxBossRushBosses[boss].stage,g_ram[body+22]);
       check(base && g_ram[body+0x33]==(base->attributes&14),
@@ -510,6 +624,9 @@ static void rush_hit_visual_checks(uint8_t *arena,uint8_t *pair,size_t cap) {
       g_ram[0xbad]=(uint8_t)(s.camera_x+100);g_ram[0xbae]=(uint8_t)((s.camera_x+100)>>8);
       g_ram[0xbb0]=(uint8_t)(s.camera_y+164);g_ram[0xbb1]=(uint8_t)((s.camera_y+164)>>8);
       g_ram[0xbb9]&=~64u;
+      /* The scrolling entrance can leave X in hurt/stomp recovery. Start
+       * this projectile fixture from an idle shooter, including Tornado. */
+      g_ram[0xbaa]=g_ram[0xbab]=g_ram[0xc2d]=0;
       bool hit=false,flashing=false,normal=false,poses[128]={0};unsigned hits=0,previous=32,last_hit=0;
       for(unsigned t=0;t<(cut?1200:180);++t) {
         /* Real native projectiles make the collision. Hold the target and
@@ -578,6 +695,14 @@ static void rush_hit_visual_checks(uint8_t *arena,uint8_t *pair,size_t cap) {
       }
       fprintf(stderr,"hit fixture boss=%u seat=%u weapon=%u hits=%u palette=%u saved=%u cut=%u remaining=%u\n",
           boss,seat,weapon,hits,g_ram[body+17]&14,g_ram[body+0x33],g_ram[body+0x36],g_ram[body+0x0c]);
+      if(getenv("MMX_BOSS_RUSH_HIT_AUDIO_TEST") && boss==7 && !cut) {
+        fprintf(stderr,"Storm Tornado native hit sounds seat=%u impacts=%u hurt=%u\n",seat,rush_hit_sounds[0],rush_hit_sounds[1]);
+        check(rush_hit_sounds[0] && rush_hit_sounds[1],"Storm Tornado hits on Mammoth retain native impact and hurt sounds in either slot");
+        MmxBossRushAudioState audio=MmxBossRushAudioGetState();
+        for(unsigned c=0;c<MMX_RUSH_AUDIO_CUES;++c)
+          check(audio.cues[c].command!=0x11 && audio.cues[c].command!=0x13,
+              "sustained weapon hits do not create overlapping private hit voices");
+      }
       check(hit && flashing && normal,"real weapon hits advance native flashing and normal damage phases");
       if(cut) check(boss==3?g_ram[body+0x36]!=0:g_ram[body+0x36]==0,
           "native Boomerang Cutter severs Octopus tentacles or Mammoth trunk");
@@ -633,7 +758,40 @@ static void rush_natural_death_checks(void) {
   puts("MMX BOSS RUSH NATIVE FATAL CONTACT CHECKS PASSED");
 }
 
+static void rush_native_hit_audio_checks(uint8_t *snapshot,size_t cap) {
+  size_t n=RtlSaveSnapshotToMemory(snapshot,cap);check(n,"native hit-audio baseline saves");
+  for(unsigned seat=0;seat<2;++seat) for(unsigned command=0x11;command<=0x13;command+=2) {
+    check(RtlLoadSnapshotFromMemory(snapshot,n),"native hit-audio baseline restores");
+    check(MmxBossRushAssign(seat,7,0xe68),"hit-audio fixture owns Mammoth in each slot");
+    MmxBossRushState s=MmxBossRushGetState();uint8_t native[2];
+    g_ram[0xe72]=0x0c;eagle_putword(g_ram+0xe6d,eagle_word(g_ram+0xbad)+40);
+    for(unsigned rush=0;rush<2;++rush) {
+      s.mode=rush?MMX_RUSH_PLAYING:MMX_RUSH_PREPARING;s.actor=rush?seat+1:0;
+      s.actor_object=0xe68;s.actor_s=0x1ffe;
+      check(MmxBossRushSetState(&s),"native/Rush sound-call context installs");
+      unsigned head=g_ram[0xba3],sequence=MmxBossRushAudioGetState().sequence;
+      CpuState cpu=g_cpu;cpu.D=0xe68;cpu.DB=cpu.PB=0x80;cpu.S=0x1ffe;cpu.P=0x30;
+      cpu.A=(uint16_t)command;cpu.host_return_valid=0;cpu_p_to_mirrors(&cpu);
+      check(interp_bridge_run(&cpu,0x8088a2),"original positional sound helper returns");
+      if(!rush) memcpy(native,g_ram+0xb72+head,2);
+      else {
+        fprintf(stderr,"shared hit seat=%u command=%02x native=%02x/%02x Rush=%02x/%02x\n",
+            seat,command,native[0],native[1],g_ram[0xb72+head],g_ram[0xb73+head]);
+        check(!memcmp(native,g_ram+0xb72+head,2),"shared hit command and pan match the original native sound request");
+        check(MmxBossRushAudioGetState().sequence==sequence,"shared hit requests do not allocate private voices");
+      }
+    }
+    MmxBossRushAudioState audio=MmxBossRushAudioGetState(),legacy=audio;
+    legacy.cues[0]=(MmxBossRushAudioCue){.command=(uint8_t)command,.object=0xe68,.seat=(uint8_t)seat,.kind=0x0c};
+    check(MmxBossRushAudioSetState(&legacy),"legacy impact cues remain valid in saved states");
+    check(MmxBossRushAudioSetState(&audio),"audio history restores after legacy cue check");
+  }
+  check(RtlLoadSnapshotFromMemory(snapshot,n),"native hit-audio baseline restores after checks");
+  check(!MmxBossRushAudioClip(0x11,NULL) && !MmxBossRushAudioClip(0x13,NULL),
+      "shared hit sounds retain their native voice priority and retrigger behavior");
+}
 static void rush_audio_checks(uint8_t *snapshot,size_t cap) {
+  rush_native_hit_audio_checks(snapshot,cap);
   Apu *a=apu_init();apu_reset(a);unsigned entry=0;
   const uint8_t *rom=g_snes->cart->rom;
   static const uint8_t banks[]={0,1,2,0x42,0x47};
@@ -954,8 +1112,9 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
   if(getenv("MMX_BOSS_RUSH_MENU_TEST")) {rush_return_title_checks();return;}
   if(getenv("MMX_BOSS_RUSH_STATE_FORMAT_TEST")) {rush_state_format_checks(start,expected,actual,cap);return;}
   if(getenv("MMX_BOSS_RUSH_AUDIO_TEST")) {rush_audio_checks(start,cap);return;}
+  if(getenv("MMX_BOSS_RUSH_DROP_TEST")) {rush_drop_checks(start,expected,actual,cap);return;}
   if(getenv("MMX_BOSS_RUSH_DEATH_TEST")) {rush_natural_death_checks();return;}
-  if(getenv("MMX_BOSS_RUSH_HIT_VISUAL_TEST")) {rush_hit_visual_checks(start,expected,cap);return;}
+  if(getenv("MMX_BOSS_RUSH_HIT_VISUAL_TEST") || getenv("MMX_BOSS_RUSH_HIT_AUDIO_TEST")) {rush_hit_visual_checks(start,expected,cap);return;}
   if(getenv("MMX_BOSS_RUSH_CHAMELEON_TEST")) {rush_chameleon_replacement_checks(start,cap);return;}
   if(getenv("MMX_BOSS_RUSH_REPLACEMENT_VISUAL_TEST") || getenv("MMX_BOSS_RUSH_PAUSE_VISUAL_TEST")) {
     rush_replacement_menu_checks(start,expected,cap);return;

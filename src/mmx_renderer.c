@@ -364,13 +364,14 @@ void MmxRendererRecordPiece(const uint8_t ram[0x20000], uint16_t d) {
 }
 void MmxRendererLatchSprites(void) {
   if ((frame_held || MmxZeroSwapping() || MmxWeaponsTimeActive()) && !building_count) return;
-  /* Menu fades suspend OAM construction but the PPU keeps its previous
-   * sprites. Retain only Zero's attribution; drawing still requires an exact
-   * match in that raster's live OAM, so a real hidden blink stays hidden. */
-  if (MmxZeroEnabled() && !building_count && latched_stage == building_stage) {
+  /* Menu fades suspend OAM construction while the PPU repeats old sprites.
+   * Keep Zero and private boss attribution until native OAM retires them. */
+  bool rush=MmxBossRushGetState().mode==MMX_RUSH_PLAYING;
+  if ((MmxZeroEnabled() || rush) && !building_count && latched_stage == building_stage) {
     unsigned count = 0;
     for (unsigned i = 0; i < latched_count; ++i)
-      if (zero_actor(latched[i].object,latched[i].animation)) latched[count++] = latched[i];
+      if ((MmxZeroEnabled() && zero_actor(latched[i].object,latched[i].animation)) ||
+          (rush && MmxBossRushOwner(latched[i].object)>=0)) latched[count++] = latched[i];
     latched_count = count;
   } else {
     latched_count = building_count;
@@ -497,6 +498,8 @@ void MmxRendererBeginFrame(const uint8_t ram[0x20000]) {
       (frame_rush.mode==MMX_RUSH_PLAYING && MmxWidePolicy_IsStageScene(frame.ram) &&
        !zero_weapons_menu() &&
        !MmxWeaponsMenuVisible(frame.ram));
+  if(frame_rush.mode==MMX_RUSH_PLAYING && frame.expand && !frame.expanded_count && frame.piece_count)
+    frame.expand=false; /* A fade retained native OAM, not a new expanded queue. */
   if (MmxZeroEnabled() && frame.expand) for (unsigned i = 0; i < frame.piece_count; ++i) {
     Piece p = frame.pieces[i]; if (!zero_actor(p.object,p.animation)) continue;
     bool found = false;
@@ -515,6 +518,16 @@ static bool pilot_overlay_oam_match(const Piece *piece) {
       if (ox == piece->x && (pos >> 8) == ((unsigned)piece->y & 255) &&
           r->oam[slot * 2 + 1] == piece->attr) return true;
     }
+  }
+  return false;
+}
+static bool rush_pause_art_needed(void) {
+  if(frame_rush.mode!=MMX_RUSH_PLAYING) return false;
+  for(unsigned i=0;i<frame.piece_count;++i) {
+    const Piece *p=frame.pieces+i;
+    if(p->object<0xe68 || p->object>=0x1d08 ||
+        (p->object>=0x1928 && p->object<=0x1988)) continue;
+    if(frame_rush.owner[(p->object-0xe68)/32] && pilot_overlay_oam_match(p)) return true;
   }
   return false;
 }
@@ -1805,7 +1818,10 @@ bool MmxRendererDraw(uint32_t *out, MmxRenderView view, bool hud) {
   }
   bool zero_menu = zero_weapons_menu();
   bool weapon_menu = MmxWeaponsMenuVisible(frame.ram);
-  bool menu = zero_menu || weapon_menu;
+  /* Plain X's menu normally uses the stock frame. During a Rush fade it
+   * still needs private art until the last matching boss OAM disappears. */
+  bool menu = zero_menu || weapon_menu ||
+      (!MmxWidePolicy_IsStageScene(frame.ram) && rush_pause_art_needed());
   bool zero_title = zero_title_menu();
   bool stage = MmxWidePolicy_IsStageScene(frame.ram) && !menu;
   bool rush_hud = stage && frame_rush.loaded;
@@ -1883,10 +1899,13 @@ bool MmxRendererDraw(uint32_t *out, MmxRenderView view, bool hud) {
   MmxSpriteAsset rush_flash_art[2];
   bool rush_flash_ready[2]={false,false};
   bool camouflage_ready=false;
-  if (stage && g_mmx_render_asset_repairs) for (unsigned i = 0; i < piece_count; ++i) {
+  if ((stage || frame_rush.mode==MMX_RUSH_PLAYING) && g_mmx_render_asset_repairs) for (unsigned i = 0; i < piece_count; ++i) {
     const Piece *s = &pieces[i];
-    const MmxSpriteAsset *a = MmxRenderAssetsObjectSprite(frame.ram, s->object, s->animation);
-    if(frame_rush.mode==MMX_RUSH_PLAYING && s->object>=0xe68 && s->object<0x1d08) {
+    const MmxSpriteAsset *a = stage ? MmxRenderAssetsObjectSprite(frame.ram, s->object, s->animation) : NULL;
+    /* The menu reuses $1928..$1988 for armor and its player preview. Other
+     * still-visible boss pieces retain private art through the transition. */
+    if(frame_rush.mode==MMX_RUSH_PLAYING && s->object>=0xe68 && s->object<0x1d08 &&
+        !(menu && s->object>=0x1928 && s->object<=0x1988)) {
       unsigned owner=frame_rush.owner[(s->object-0xe68)/32];
       if(owner && owner<=2) {
         const MmxSpriteAsset *private=MmxRenderAssetsRushObjectSprite(frame.ram,s->object,
@@ -2005,6 +2024,8 @@ bool MmxRendererDraw(uint32_t *out, MmxRenderView view, bool hud) {
           replaced[slot] = true; center = true;
         }
       }
+      if(frame_rush.mode==MMX_RUSH_PLAYING && !frame.expand && s.object>=0xe68 && s.object<0x1d08 &&
+          frame_rush.owner[(s.object-0xe68)/32] && !oam_match) continue;
       /* Match original OAM before reprojection. HUD and native script panels
        * keep screen coordinates; world pieces use the selected peer origin. */
       if(stage) {s.x-=view_dx;s.y-=view_dy;}
