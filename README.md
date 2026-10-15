@@ -174,9 +174,10 @@ needs to be enabled. When a problem occurs, stop playing and zip the session's
 During netplay, collect the files from both players if possible. Describe what
 happened and roughly when. Keep your source ROMs out of the attachment.
 
-The newest six replay segments are kept (normally about a minute of gameplay;
-rollback or frequent state loads can shorten this). Each segment is capped at
-600 frame executions or 16 MiB of checkpoints. Run-ahead currently suspends
+Replay history keeps up to **one hour** (360 segments), with a **256 MiB budget
+for machine checkpoints** plus the bounded input/settings sidecars. Rollback or
+frequent state loads can shorten this window. Each segment is capped at 600
+frame executions or 16 MiB of checkpoints. Run-ahead currently suspends
 replay capture; turn it off while collecting a report. To opt out of automatic
 recording, set the environment variable `MMX_REPLAY_RECORD=0` and leave the
 Developer diagnostic options disabled.
@@ -185,11 +186,19 @@ For extra detail, enable **Co-op physics diagnostics** or **Tier 2 diagnostics**
 under **Mods > Developer**. These optional detailed traces remain off by default;
 the rolling replay capture runs without them.
 
+Replay writes and state hashing run on a background worker using a fixed 16 MiB
+queue. Each detailed CSV trace has a fixed 4 MiB queue. If storage falls behind
+or fails, the affected recording stops with an explicit runtime-log warning;
+gameplay does not wait for the writer and the queue cannot keep growing.
+Quit normally to drain accepted records before zipping the logs. An abrupt
+process kill can lose the unflushed tail (replay flushes run every 100 ms).
+
 The existing collision trace is written in 32 MiB
 numbered segments (`logs/coop-physics-<start time>-<pid>-<n>-001.csv`, `-002.csv`,
 ...); the newest 32 are kept. Attach every segment of the session. During netplay
 the same mod also writes `logs/coop-netplay-*` segments with the same name stem;
 attach those too, from both players if possible.
+CSV writes, flushing and rotation also run on background workers.
 
 Developers can reproduce a capture with the same build and owned source ROMs:
 
@@ -207,6 +216,13 @@ as incomplete, never as a successful replay. Playback executes that final input
 so the original hang/crash can recur under a debugger. The format preserves actual
 rollback executions and restored checkpoints, so do not deduplicate frame
 numbers as an input-only CSV route would.
+
+New recordings use format 2 with the original ROM's identity, independent of
+temporary character collision-table patches. The helper also accepts format 1;
+legacy ROM validation reconstructs known collision-table variants and still
+rejects a different ROM. This workflow follows X4's
+[Playtest Diagnostics](https://github.com/mstan/MegaManX4Recomp/pull/19); the shared
+bounded writer implementation lives in snesrecomp.
 
 The ROM-backed acceptance suite is `tests/test_diagnostic_replay.py`; build
 with `-DMMX_STATE_TESTS=ON` and supply `--state-tests`, `--game`, `--rom`,

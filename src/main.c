@@ -22,6 +22,7 @@
 #include "mmx_netplay.h"
 #include "mmx_startup.h"
 #include "mmx_coop_trace.h"
+#include "mmx_coop.h"
 #include "mmx_coop_view.h"
 #include "mmx_replay.h"
 #include "desktop/sdl_compat.h"
@@ -185,6 +186,12 @@ static void MmxAfterConfig(void) {
     g_config.output_method = kOutputMethod_SDL;
   }
 }
+static void MmxShutdown(void) {
+  /* SDL owns the worker-thread handles. Drain them before host SDL teardown;
+   * the idempotent atexit handlers remain a fallback for earlier exits. */
+  MmxReplayShutdown();
+  MmxCoopSetDiagnosticsEnabled(false);
+}
 static void MmxAfterFrame(const SnesDesktopHostFrameStats *stats) {
   if (MmxReplayPlaying() && (MmxReplayFinished() || MmxReplayFailed())) {
     SDL_Event quit = {0}; quit.type = SDL_QUIT; SDL_PushEvent(&quit);
@@ -305,6 +312,7 @@ int MMX_DESKTOP_ENTRY(int argc, char **argv) {
     .configure_launcher = MmxNetplayConfigureLauncher,
     .prepare_netplay = MmxNetplayPrepare,
     .netplay_ready = MmxNetplayReady,
+    .on_shutdown = MmxShutdown,
   };
   int result = snesrecomp_desktop_main(&game, argc, argv);
   MmxReplayClose();
