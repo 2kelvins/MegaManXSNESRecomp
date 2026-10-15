@@ -88,6 +88,12 @@ static void actor_hook(CpuState *cpu,uint32_t pc) {
 static void boss_hook(CpuState *cpu,uint32_t pc) {
   MmxBossRushState s=MmxBossRushGetState();int owner=MmxBossRushOwner(cpu->D);
   unsigned at=pc&0x7fffff;
+  if(at==0x00c93c && (s.mode==MMX_RUSH_PREPARING || s.mode==MMX_RUSH_PLAYING)) {
+    /* Full weapon inventory normally enables the Escape Unit. An endless
+     * run ends only on death: use the retail unavailable cue/zero return,
+     * before the menu can set its escape flag or start the exit sequence. */
+    interp_bridge_pre_opcode_redirect((pc&0xff0000)|0xc94f);return;
+  }
   if(at==0x00d1ed && s.mode==MMX_RUSH_PREPARING) {
     /* Run the native music call inside the guest scheduler, so a multi-frame
      * SPC upload can yield and resume normally. Saved registers live on the
@@ -304,7 +310,7 @@ void MmxBossRushHostFrame(void) {
   const unsigned bosses[]={0x849feb,0x84a003,0x84aadd,0x84a677,0x849b03,0x849b43,
     0x848fca,0x848fad,0x9ac7,0xdc36,0xdd47,0xd1ed,0x94d9,0x8c56,0xe68e,0x879258,0x879276,0x8088d6,0x849f19,0x849f2a,0x849f2f,0x849f7e,
     0x8885b5,0x888dab,0x888e0f,0x888d79,0x888d2f,0x888d5e,0x88876a,0x828297,0x82829d,0x83b192,
-    0x8498ff,0x84990d,0x81b7bf,0x81b81b,0x87efd2,0x87925e};
+    0x8498ff,0x84990d,0x81b7bf,0x81b81b,0x87efd2,0x87925e,0xc93c};
   for(unsigned i=0;i<sizeof(bosses)/sizeof(*bosses);++i)
     registered&=interp_bridge_add_pre_opcode_hook(bosses[i],boss_hook);
   static bool warned;

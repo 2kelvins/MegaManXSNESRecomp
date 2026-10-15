@@ -10,6 +10,9 @@ replaced after cleanup. Each defeated boss leaves one large native health
 pickup when its explosion ends. It heals its collector by eight points and
 uses the original pickup physics, lifetime and Sub Tank rules. A run ends when its last player dies.
 The native player death animation finishes before results appear.
+The pause menu's Escape Unit is unavailable during preparation and combat;
+selecting it gives the original unavailable feedback and keeps the menu open.
+Runs end only when the last player dies. Weapons and Sub Tanks remain usable.
 
 Select **Boss Rush** beneath **Option Mode**. Enable the launcher's existing
 co-op mod and supply its X3 ROM to play together. Two native meters on the right
