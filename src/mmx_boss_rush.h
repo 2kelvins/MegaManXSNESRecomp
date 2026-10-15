@@ -53,6 +53,8 @@ void MmxBossRushStart(bool coop, uint32_t seed);
 MmxBossRushState MmxBossRushGetState(void);
 bool MmxBossRushValidState(const MmxBossRushState *state);
 bool MmxBossRushSetState(const MmxBossRushState *state);
+/* The arena belt runs only while a living Mammoth is present. */
+bool MmxBossRushConveyorRunning(const MmxBossRushState *state);
 int MmxBossRushNextBoss(void);
 bool MmxBossRushAssign(unsigned slot, unsigned id, uint16_t object);
 bool MmxBossRushDefeat(unsigned slot);

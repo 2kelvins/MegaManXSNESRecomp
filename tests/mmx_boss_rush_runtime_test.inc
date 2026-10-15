@@ -12,6 +12,33 @@ static void rush_keep_players_alive(void) {
   }
 }
 static unsigned rush_death_sounds;
+static void rush_conveyor_checks(uint8_t *snapshot,size_t cap) {
+  size_t n=RtlSaveSnapshotToMemory(snapshot,cap);check(n,"live conveyor fixture saves");
+  for(unsigned seat=0;seat<2;++seat) for(unsigned phase=0;phase<4;++phase) for(unsigned direction=0;direction<2;++direction) {
+    check(RtlLoadSnapshotFromMemory(snapshot,n),"conveyor fixture restores");
+    MmxBossRushState s=MmxBossRushGetState();
+    if(!seat) {MmxBossRushBoss b=s.bosses[0];s.bosses[0]=s.bosses[1];s.bosses[1]=b;}
+    check(s.bosses[seat].id==7,"Mammoth occupies each conveyor test seat");
+    if(phase==1) {s.bosses[seat].phase=MMX_RUSH_DYING;s.bosses[seat].health=0;}
+    if(phase==2) memset(&s.bosses[seat],0,sizeof(s.bosses[seat]));
+    if(phase==3) s.mode=MMX_RUSH_PREPARING;
+    check(MmxBossRushSetState(&s),"conveyor phase installs");
+    eagle_putword(g_ram+0x2c,0xba8);g_ram[0xbac]=0;eagle_putword(g_ram+0xbad,s.camera_x+64);
+    uint32_t before=(uint32_t)g_ram[0xbac]|((uint32_t)eagle_word(g_ram+0xbad)<<8);
+    CpuState cpu=g_cpu;cpu.D=0;cpu.DB=cpu.PB=0x84;cpu.S=0x1ffe;cpu.P=0x20;cpu.host_return_valid=0;
+    cpu_p_to_mirrors(&cpu);
+    /* Enter just after the native solid-floor correction. Execute the real
+     * carry, collision helper and return with the production hooks installed. */
+    check(interp_bridge_run(&cpu,direction?0x84990d:0x8498ff),"native conveyor carry returns cleanly");
+    uint32_t after=(uint32_t)g_ram[0xbac]|((uint32_t)eagle_word(g_ram+0xbad)<<8);
+    uint32_t expected=phase?before:before+(direction?-128:128);
+    fprintf(stderr,"conveyor seat=%u phase=%u direction=%u x=%06x expected=%06x\n",seat,phase,direction,after,expected);
+    check(after==expected,"both conveyor directions carry only while Mammoth lives, in either boss seat");
+  }
+  check(RtlLoadSnapshotFromMemory(snapshot,n),"live arena restores after conveyor checks");
+  frame(0);rush_keep_players_alive(); /* A load invalidates the presentation capture. */
+  puts("MMX BOSS RUSH NATIVE CONVEYOR CHECKS PASSED");
+}
 static void rush_title_navigation_checks(uint8_t *snapshot,size_t cap) {
   size_t saved=RtlSaveSnapshotToMemory(snapshot,cap);check(saved,"title navigation baseline saves");
   for(unsigned row=0;row<4;++row) for(unsigned direction=0;direction<3;++direction) {
@@ -666,7 +693,7 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
       MmxBossRushGetState().mode,g_ram[0x1f7a],g_ram[0x1f81],g_ram[0x1f82],g_ram[0xd1],g_ram[0xd2],g_ram[0xd3],
       g_ram[0xba9],g_ram[0xbaa],g_ram[0xbab],g_ram[0xbad]|g_ram[0xbae]<<8,g_ram[0xbb0]|g_ram[0xbb1]<<8,
       g_ram[0x1e4d]|g_ram[0x1e4e]<<8,g_ram[0x1e50]|g_ram[0x1e51]<<8);
-  check(MmxBossRushGetState().mode==MMX_RUSH_PREPARING,"title selection starts between Penguin's doors");
+  check(MmxBossRushGetState().mode==MMX_RUSH_PREPARING,"title selection starts in the final boss-door corridor");
   check((g_ram[0xbad]|g_ram[0xbae]<<8)>=0x1d00 &&
       (g_ram[0xbad]|g_ram[0xbae]<<8)<0x1e00,"player arrives in the native preparation corridor");
   check(MmxRendererSaveCapture("rush-preparation.cap"),"preparation corridor capture saves");
@@ -719,6 +746,51 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
   check(g_ram[0xfffd]==boss_bank && g_ram[0xfffd]!=stage_bank,
       "native boss music bank replaces the stage bank");
   check(MmxBossRushGetState().mode==MMX_RUSH_PLAYING,"crossing the second door starts the encounter");
+  if(getenv("MMX_BOSS_RUSH_ARENA_TEST")) {
+    MmxBossRushState s=MmxBossRushGetState();
+    memset(s.bosses,0,sizeof(s.bosses));memset(s.owner,0,sizeof(s.owner));
+    memset(g_ram+0xe68,0,0x3c0);memset(g_ram+0x1428,0,0x8e0);
+    s.queue[0]=0;s.queue[1]=7;s.queued=8;
+    for(unsigned i=1;i<7;++i)s.queue[i+1]=(uint8_t)i;
+    check(MmxBossRushSetState(&s),"arena fixture selects Penguin and Mammoth");
+    for(unsigned t=0;t<1500;++t) {
+      frame(0);rush_keep_players_alive();s=MmxBossRushGetState();
+      if(t%60==0) fprintf(stderr,"arena tick=%u defeated=%u bosses=%u:%u:%u/%u:%u:%u xy=%04x,%04x/%04x,%04x\n",
+          t,s.defeated,s.bosses[0].id,s.bosses[0].phase,g_ram[s.bosses[0].object+1],
+          s.bosses[1].id,s.bosses[1].phase,g_ram[s.bosses[1].object+1],
+          eagle_word(g_ram+s.bosses[0].object+5),eagle_word(g_ram+s.bosses[0].object+8),
+          eagle_word(g_ram+s.bosses[1].object+5),eagle_word(g_ram+s.bosses[1].object+8));
+      if(s.bosses[0].phase==MMX_RUSH_FIGHTING && s.bosses[1].phase==MMX_RUSH_FIGHTING) break;
+    }
+    check(s.bosses[0].id==0 && s.bosses[1].id==7 && !s.defeated &&
+        s.bosses[0].phase==MMX_RUSH_FIGHTING && s.bosses[1].phase==MMX_RUSH_FIGHTING,
+        "Penguin and Mammoth complete entrances in the new arena");
+    check(MmxRendererSaveCapture("rush-mammoth-arena.cap"),"Mammoth arena capture saves");
+    rush_conveyor_checks(start,cap);
+    for(unsigned t=0;t<7;++t) {frame(0);rush_keep_players_alive();}
+    check(MmxRendererSaveCapture("rush-mammoth-arena-later.cap"),"later Mammoth arena capture saves");
+    fprintf(stderr,"arena floor=%02x player=%u,%u camera=%u,%u palette-state=%u/%u\n",
+        MmxWeaponsTerrainClass(g_ram,eagle_word(g_ram+0xbad),eagle_word(g_ram+0xbb0)+17),
+        eagle_word(g_ram+0xbad),eagle_word(g_ram+0xbb0),eagle_word(g_ram+0x1e4d),eagle_word(g_ram+0x1e50),g_ram[0x1f09],g_ram[0x1f0a]);
+    size_t n=RtlSaveSnapshotToMemory(start,cap);check(n,"live Mammoth arena saves");
+    s=MmxBossRushGetState();g_ram[s.bosses[1].object+0x27]=0;frame(0);
+    s=MmxBossRushGetState();
+    check(s.defeated==1 && s.bosses[1].phase==MMX_RUSH_DYING && !MmxBossRushConveyorRunning(&s),
+        "native Mammoth defeat stops the conveyor immediately");
+    for(unsigned t=0;t<90;++t) {frame(0);rush_keep_players_alive();}
+    static uint32_t stopped[256*224],later[256*224];
+    check(MmxRendererDraw(stopped,(MmxRenderView){256,0,4.0/3.0},true),"stopped conveyor renders");
+    for(unsigned t=0;t<17;++t) {frame(0);rush_keep_players_alive();}
+    check(MmxRendererDraw(later,(MmxRenderView){256,0,4.0/3.0},true),"stopped conveyor renders later");
+    for(unsigned y=200;y<224;++y)
+      check(!memcmp(stopped+y*256+32,later+y*256+32,192*sizeof(*stopped)),
+          "conveyor pixels stay stationary after Mammoth is replaced");
+    check(MmxRendererSaveCapture("rush-conveyor-stopped.cap"),"stopped conveyor capture saves");
+    check(RtlLoadSnapshotFromMemory(start,n),"live Mammoth arena restores after defeat checks");
+    frame(0);rush_keep_players_alive();
+    puts("MMX BOSS RUSH ARENA CHECKS PASSED");
+    return;
+  }
   if(getenv("MMX_BOSS_RUSH_MENU_TEST")) {rush_return_title_checks();return;}
   if(getenv("MMX_BOSS_RUSH_STATE_FORMAT_TEST")) {rush_state_format_checks(start,expected,actual,cap);return;}
   if(getenv("MMX_BOSS_RUSH_AUDIO_TEST")) {rush_audio_checks(start,cap);return;}

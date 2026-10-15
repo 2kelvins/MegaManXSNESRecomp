@@ -21,7 +21,8 @@ metadata and does not affect gameplay snapshots or rollback.
 
 ## Screenshots
 
-These images come from playtest9 native ROM-backed runs. Full frames are
+The Mammoth-room images show the current arena; the remaining images document
+earlier native ROM-backed validation. Full frames are
 enlarged with nearest-neighbor scaling; the hit and cut comparisons use labeled
 crops. The fixtures select pairs and position projectiles for repeatable checks.
 The Game Over score is an example from the results fixture.
@@ -30,9 +31,14 @@ Native title entry:
 
 ![Boss Rush selected on the native title menu](screenshots/boss-rush-title.png)
 
-Penguin and Kuwanger in the enclosed arena with two native boss meters:
+Penguin and Mammoth in the factory arena, with Penguin's original ceiling mount
+and handle at the top center:
 
-![Two bosses, native health meters and the defeat counter](screenshots/boss-rush-arena.png)
+![Mammoth arena with Penguin's ceiling mount and native boss meters](screenshots/boss-rush-mammoth-arena.png)
+
+The same arena in local co-op:
+
+![X and Zero facing Penguin and Mammoth](screenshots/boss-rush-mammoth-coop.png)
 
 Native font, final count, persistent high score and retry choices:
 
@@ -79,9 +85,9 @@ global victory/death effect is replaced by a local cleanup interval. Each
 boss's child actors belong to its encounter; cleanup preserves the other
 boss, its children, and both players' projectiles.
 
-The run loads Chill Penguin's last native checkpoint between the boss doors.
-Players can prepare weapons there; crossing the second door scrolls into the
-enclosed room and starts the encounter and boss music. Door, checkpoint and
+The run loads Flame Mammoth's last native checkpoint in the final door corridor.
+Players can prepare weapons there; crossing the door scrolls into the
+boss room and starts the encounter and boss music. Door, checkpoint and
 camera events remain active during preparation; stock stage enemies are
 filtered before allocation. Because Rush bypasses the stock boss's shared
 player intro, the encounter requests battle song `$1E` through the native dispatcher
@@ -96,6 +102,14 @@ metatile collision data and its fixed camera. Kuwanger
 starts higher to finish his native downward entrance above that floor. Mammoth
 uses a fixed arrival position and bypasses the factory's player-distance gate;
 his native entrance animation and health-fill states still run.
+The conveyor carries players only while a living Mammoth is present, and its
+palette animation stops with the carry. Preparation and other boss pairs leave
+it stationary. All eight X1 weapons and four shared Sub Tanks start full.
+
+Penguin's ceiling mount is reconstructed from his original room's layout,
+metatiles, graphics resource and palettes at ROM load. It draws at the top
+center without replacing the factory's VRAM or collision. His original handle
+child actor still spawns and animates with Penguin, then leaves with his encounter.
 
 The title entry uses the native BG3 font and selection palettes. Navigation
 wraps through all four rows with Up, Down or Select. Returning through Main Menu

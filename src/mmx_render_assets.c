@@ -33,6 +33,8 @@ static unsigned bg_stage = ~0u;
 static uint8_t bg_phase[2][8192], bg_chr[16][65536];
 static bool bg_chr_valid[16][2048], bg_chr_ready[16], bg_palette_ready[16];
 static MmxBackgroundPalette bg_palette[16];
+static int rush_ceiling[64*24];
+static bool rush_ceiling_ready;
 static bool range(size_t a, size_t n) { return a <= rom_size && n <= rom_size - a; }
 static unsigned word(size_t a) { return range(a, 2) ? rom[a] | (rom[a + 1] << 8) : 0; }
 static size_t lorom(unsigned a) { return ((a >> 16) & 127) * 0x8000u + (a & 0x7fff); }
@@ -43,6 +45,7 @@ void MmxRenderAssetsSetRom(const uint8_t *bytes, size_t size) {
   rom = bytes; rom_size = size;
   cached_stage = cached_section = ~0u;
   bg_stage = ~0u;
+  rush_ceiling_ready=false;
   captive_zero_ready = 0;
   teleport_x_ready = false;
   death_orbs_ready = false;
@@ -239,6 +242,77 @@ void MmxRenderAssetsPreloadRush(void) {
       }
     }
   }
+  MmxRenderAssetsRushCeilingPixel(0,0);
+}
+int MmxRenderAssetsRushCeilingPixel(unsigned x,unsigned y) {
+  if(x>=64 || y>=24 || !rom) return -1;
+  if(!rush_ceiling_ready) {
+    rush_ceiling_ready=true;
+    for(unsigned i=0;i<64*24;++i) rush_ceiling[i]=-1;
+    /* The native layout RLE selects screen ($1E,$01). Its 32x32 blocks
+     * select 16x16 metatiles, which retain the original tile flips/priority.
+     * Use ROM tables directly; never borrow the arena's VRAM or palettes. */
+    const unsigned stage=8;
+    size_t directory=0x30d24+stage*3;
+    if(!range(directory,3)) return -1;
+    size_t p=lorom(word(directory)|(rom[directory+2]<<16));
+    if(!range(p,3) || rom[p]<=30 || rom[p+1]<=1 || rom[p]>32 || rom[p+1]>32) return -1;
+    unsigned wanted=rom[p]+30,cell=0,screen=256;p+=3;
+    for(unsigned guard=0;guard<1024 && range(p,2) && rom[p]!=255;++guard,p+=2) {
+      unsigned count=rom[p]&127;
+      if(!count) return -1;
+      if(wanted>=cell && wanted-cell<count) {
+        screen=(rom[p+1]+((rom[p]&128)?0:wanted-cell))&255;break;
+      }
+      cell+=count;
+    }
+    if(screen==256) return -1;
+    size_t tables[3];
+    for(unsigned i=0;i<3;++i) {
+      directory=0x30d93+i*0x6f+stage*3;
+      if(!range(directory,3)) return -1;
+      tables[i]=lorom(word(directory)|(rom[directory+2]<<16));
+    }
+    size_t count;const uint8_t *chr=resource_data(0x0c,&count);
+    if(!chr) return -1;
+    /* $85:E2E0 is Penguin's native base BG palette (DIZ). The mount uses
+     * its $10 group; room palette phase 2 replaces the $70 pink panel. */
+    uint16_t colors[128]={0};bool valid[128]={false};
+    if(!range(0x2e300,32)) return -1;
+    for(unsigned i=0;i<16;++i) {colors[16+i]=(uint16_t)word(0x2e300+i*2);valid[16+i]=true;}
+    size_t base=0x32260;
+    p=base+word(base+word(base+stage*2)+2*2);
+    bool complete=false;
+    for(unsigned guard=0;guard<32 && range(p,3);++guard,p+=3) {
+      if(word(p)==65535) {complete=true;break;}
+      size_t source=0x28000+(word(p)&0x7fff);unsigned dest=rom[p+2];
+      if(dest+16>128 || !range(source,32)) return -1;
+      for(unsigned i=0;i<16;++i) {colors[dest+i]=(uint16_t)word(source+i*2);valid[dest+i]=true;}
+    }
+    if(!complete) return -1;
+    for(unsigned ty=0;ty<3;++ty) for(unsigned tx=0;tx<8;++tx) {
+      unsigned sx=96+tx*8,sy=ty*8;
+      size_t a=tables[0]+screen*128+(sy/32*8+sx/32)*2;
+      if(!range(a,2)) return -1;
+      a=tables[1]+word(a)*8+((sy/16%2)*2+sx/16%2)*2;
+      if(!range(a,2)) return -1;
+      a=tables[2]+word(a)*8+((sy/8%2)*2+sx/8%2)*2;
+      if(!range(a,2)) return -1;
+      unsigned tile=word(a),number=tile&1023;
+      if(number==7) continue; /* Native empty common tile; retain the arena underneath. */
+      if(number<16 || (number-16)*32+32>count) return -1;
+      const uint8_t *bits=chr+(number-16)*32;
+      for(unsigned py=0;py<8;++py) for(unsigned px=0;px<8;++px) {
+        unsigned row=(tile&0x8000)?7-py:py,shift=(tile&0x4000)?px:7-px;
+        unsigned pixel=((bits[row*2]>>shift)&1)|(((bits[row*2+1]>>shift)&1)<<1)|
+            (((bits[row*2+16]>>shift)&1)<<2)|(((bits[row*2+17]>>shift)&1)<<3);
+        unsigned index=(tile>>10&7)*16+pixel;
+        if(pixel && valid[index]) rush_ceiling[(ty*8+py)*64+tx*8+px]=
+            colors[index]|((tile&0x2000)?0x10000:0);
+      }
+    }
+  }
+  return rush_ceiling[y*64+x];
 }
 static bool tiles(unsigned id, uint8_t out[8192]) {
   uint8_t decoded[65536];

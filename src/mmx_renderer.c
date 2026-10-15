@@ -925,6 +925,16 @@ static int weapon_menu_icon(int x, int y) {
 }
 static uint16_t background(const Ppu *p, const Raster *r, unsigned layer, int x, int y, bool stage, int *private_color) {
   static const unsigned low[] = {8, 7, 1}, high[] = {12, 11, 3};
+  if(stage && layer==0 && frame.ram[0x1f7a]==4 &&
+      (frame_rush.mode==MMX_RUSH_PLAYING || frame_rush.mode==MMX_RUSH_PREPARING)) {
+    int sx=x+view_camera(frame.ram,0x1e4d)-(int)frame_rush.camera_x-96;
+    int sy=y+view_camera(frame.ram,0x1e50)-(int)frame_rush.camera_y;
+    int pixel=MmxRenderAssetsRushCeilingPixel((unsigned)sx,(unsigned)sy);
+    if(pixel>=0) {
+      *private_color=pixel&0x7fff;
+      return (uint16_t)(((pixel&0x10000?high[0]:low[0])<<12)|1);
+    }
+  }
   bool margin = x < 0 || x >= 256;
   /* Launch's BG3 water plane is blended over the world on the subscreen.
    * Repeat that plane while retaining the vertical waterline/scroll. Other
@@ -1094,6 +1104,18 @@ static uint16_t background(const Ppu *p, const Raster *r, unsigned layer, int x,
       (armadillo_lower_shaft ? MmxRenderAssetsBackgroundPalettePhase(frame.ram, 1) :
        MmxRenderAssetsBackgroundPalette(frame.ram, asset_x)) : NULL;
   if (palette && palette->valid[index]) *private_color = palette->colors[index];
+  if(stage && layer==0 && frame.ram[0x1f7a]==4 && index>=0x50 && index<0x60 &&
+      (frame_rush.mode==MMX_RUSH_PLAYING || frame_rush.mode==MMX_RUSH_PREPARING)) {
+    int wy=y+view_camera(frame.ram,0x1e50)-(int)frame_rush.camera_y;
+    if(wy>=192 && wy<224) {
+      /* The belt animates by cycling BG palette $50. Match its physical
+       * carry: use live colors with Mammoth, the native first phase otherwise.
+       * Explicit live colors also keep expanded margins animating in sync. */
+      const MmxBackgroundPalette *belt=MmxRenderAssetsBackgroundPalettePhase(frame.ram,(frame.ram[0x1f96]&0x40)?9:4);
+      if(MmxBossRushConveyorRunning(&frame_rush)) *private_color=r->palette[index];
+      else if(belt && belt->valid[index]) *private_color=belt->colors[index];
+    }
+  }
   unsigned priority = tile & 0x2000 ? (layer == 2 && (p->bgmode & 8) ? 15 : high[layer]) : low[layer];
   return (uint16_t)((priority << 12) | (layer << 8) | index);
 }
@@ -1745,10 +1767,12 @@ static void rush_native_text(uint32_t *out,MmxRenderView view,int x,int y,const 
       int dx=x+(int)n*8+col;if(dx<0 || dx>=view.width) continue;
       unsigned pixel=tile_pixel(r->vram,((p.bgTileAdr>>8)&15)*4096+(unsigned char)s[n]*8,col,row,2);
       if(!pixel) continue;
-      /* Results outlive the native death palette fade. Keep the original
-       * font's three shades readable independently of faded live CGRAM. */
+      /* Keep the original options font's three shades. Mammoth's stage
+       * repurposes the live text palette, making the counter/labels black.
+       * Gameplay text still follows native blanking and raster brightness;
+       * results outlive the native death palette fade. */
       static const uint16_t menu_colors[2][4]={{0,0x7fff,0x7fe0,0x4080},{0,0x7fff,0x7fff,0x7fe0}};
-      unsigned color=palette>=8?menu_colors[palette==9][pixel]:r->palette[palette*4+pixel];uint32_t rgb=0;
+      unsigned color=palette>=7?menu_colors[palette==9][pixel]:r->palette[palette*4+pixel];uint32_t rgb=0;
       for(unsigned c=0;c<3;++c) {
         unsigned v=(color>>(c*5))&31;v=(v<<3)|(v>>2);if(palette<8) v=v*(p.inidisp&15)/15;
         rgb|=v<<(16-c*8);

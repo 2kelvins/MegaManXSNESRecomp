@@ -78,6 +78,14 @@ bool MmxBossRushSetState(const MmxBossRushState *s) {
   if(!MmxBossRushValidState(s)) return false;
   state=*s;return true;
 }
+bool MmxBossRushConveyorRunning(const MmxBossRushState *s) {
+  if(!s || s->mode!=MMX_RUSH_PLAYING) return false;
+  for(unsigned i=0;i<2;++i) {
+    const MmxBossRushBoss *b=&s->bosses[i];
+    if(b->id==7 && b->phase && b->phase!=MMX_RUSH_DYING && b->health) return true;
+  }
+  return false;
+}
 static uint32_t random_next(void) {
   uint32_t x=state.random;x^=x<<13;x^=x>>17;x^=x<<5;
   return state.random=x;

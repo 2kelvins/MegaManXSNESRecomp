@@ -145,8 +145,8 @@ static void boss_hook(CpuState *cpu,uint32_t pc) {
   }
   if(at==0x0094d9 && s.mode==MMX_RUSH_LOADING && !s.stage_started) {
     g_ram[0xd1]=2;g_ram[0xd2]=2;g_ram[0xd3]=g_ram[0xd4]=0;
-    /* Chill Penguin's third checkpoint loads the enclosed boss-room art. */
-    g_ram[0x1f7a]=8;g_ram[0x1f81]=2;g_ram[0x1f82]=0;
+    /* Mammoth's third checkpoint starts in the final door corridor. */
+    g_ram[0x1f7a]=4;g_ram[0x1f81]=2;g_ram[0x1f82]=0;
     equipment(g_ram);s.stage_started=1;MmxBossRushSetState(&s);
   }
   if(at==0x0088d6 && playing() && getenv("MMX_BOSS_RUSH_AUDIO_TRACE")) {
@@ -158,6 +158,12 @@ static void boss_hook(CpuState *cpu,uint32_t pc) {
     cpu->A=(cpu->A&0xff00)|0xb1; /* Acknowledged null effect; preserve the native ring protocol. */
   if(at==0x00dc36 && playing()) {
     interp_bridge_pre_opcode_redirect((pc&0xff0000)|0xdcda);return;
+  }
+  if((at==0x0498ff || at==0x04990d) && g_ram[0x1f7a]==4 &&
+      (s.mode==MMX_RUSH_PREPARING || s.mode==MMX_RUSH_PLAYING) && !MmxBossRushConveyorRunning(&s)) {
+    /* The native solid-floor correction has already run. Skip only the
+     * half-pixel belt carry, preserving floor contact for either player. */
+    interp_bridge_pre_opcode_redirect((pc&0xff0000)|0x9929);return;
   }
   if(!playing()) return;
   if(at==0x009ac7) {interp_bridge_pre_opcode_redirect((pc&0xff0000)|0x9ad9);return;}
@@ -205,7 +211,7 @@ static void boss_hook(CpuState *cpu,uint32_t pc) {
   }
   if(at==0x048fca) {
     /* Boss art is decoded privately per pose. Its native DMA would read the
-     * Penguin stage's staging buffer and overwrite X/weapon/other boss CHR. */
+     * arena's staging buffer and overwrite X/weapon/other boss CHR. */
     g_ram[cpu->D+0x17]&=127;
     interp_bridge_pre_opcode_redirect((pc&0xff0000)|0x9085);return;
   }
@@ -269,7 +275,8 @@ void MmxBossRushHostFrame(void) {
     registered&=interp_bridge_add_pre_opcode_hook(actors[i],actor_hook);
   const unsigned bosses[]={0x849feb,0x84a003,0x84aadd,0x84a677,0x849b03,0x849b43,
     0x848fca,0x848fad,0x9ac7,0xdc36,0xdd47,0xd1ed,0x94d9,0x8c56,0xe68e,0x879258,0x879276,0x8088d6,0x849f19,0x849f2a,0x849f2f,0x849f7e,
-    0x8885b5,0x888dab,0x888e0f,0x888d79,0x888d2f,0x888d5e,0x88876a,0x828297,0x82829d,0x83b192};
+    0x8885b5,0x888dab,0x888e0f,0x888d79,0x888d2f,0x888d5e,0x88876a,0x828297,0x82829d,0x83b192,
+    0x8498ff,0x84990d};
   for(unsigned i=0;i<sizeof(bosses)/sizeof(*bosses);++i)
     registered&=interp_bridge_add_pre_opcode_hook(bosses[i],boss_hook);
   static bool warned;
@@ -318,10 +325,11 @@ uint16_t MmxBossRushFilterInput(uint16_t input) {
 }
 static bool prepare(uint8_t *r) {
   if(!g_snes || !g_snes->cart) return false;
-  /* Checkpoint 2 already spawns at $1D80,$0100 between the two doors.
+  /* Checkpoint 2 already spawns at $1D80,$0200 in the final corridor.
    * Preserve its native arrival, room map, collision and camera. */
   MmxBossRushState s=MmxBossRushGetState();
-  s.camera_x=0x1e00;s.camera_y=0x100;s.loaded=1;s.mode=MMX_RUSH_PREPARING;s.menu=0;
+  s.camera_x=0x1e00;s.camera_y=r[0x1f7a]==4?0x200:0x100;
+  s.loaded=1;s.mode=MMX_RUSH_PREPARING;s.menu=0; /* Retain old Penguin loading snapshots. */
   r[0x1fa0]=0;
   equipment(r);
   MmxBossRushSetState(&s);
