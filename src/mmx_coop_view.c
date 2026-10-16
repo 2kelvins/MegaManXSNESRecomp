@@ -63,7 +63,7 @@ void MmxCoopViewsPlayerLimits(const uint8_t *r,const MmxCoopState *s,unsigned se
   player_limits(r,s,seat,&bounds,out);
 }
 void MmxCoopViewsUpdateBounds(const uint8_t *r,const MmxCoopState *s) {
-  if(!online || !s->initialized || r[0x1f7a]>=12) return;
+  if(!online || !s->initialized || r[0x1f7a]>12) return;
   unsigned stage=r[0x1f7a];
   if(bounds.stage!=stage) {memset(&bounds,0,sizeof(bounds));bounds.stage=(uint8_t)stage;}
   /* Native scripted rooms and transport still own both cameras. Re-seed
@@ -75,8 +75,12 @@ void MmxCoopViewsUpdateBounds(const uint8_t *r,const MmxCoopState *s) {
        (stage==1 && r[d+10]==0x21) || (stage==2 && r[d+10]==9))) {
     bounds.valid=0;return;
   }
-  unsigned first=rom_word(0xe4e2+stage*2),end=rom_word(0xe4e4+stage*2);
-  if(first<0xe4fc || end<first || end>0xe640 || (end-first)%2) return;
+  /* Thirteen stage lists precede the first rectangle. The final list has
+   * no following stage pointer; its end is that first rectangle's address. */
+  unsigned data=rom_word(rom_word(0xe4e2));
+  unsigned first=rom_word(0xe4e2+stage*2),end=stage<12?rom_word(0xe4e4+stage*2):data;
+  if(data<0xe4fc || data>=0xecd0 || first<0xe4fc || end<first ||
+      end>data || (end-first)%2) return;
   static const unsigned targets[4]={0x1e5e,0x1e60,0x1e68,0x1e6e};
   for(unsigned seat=0;seat<2;++seat) {
     if(!living(&s->players[seat]) || s->players[seat].zero.swap_phase) {
@@ -90,7 +94,7 @@ void MmxCoopViewsUpdateBounds(const uint8_t *r,const MmxCoopState *s) {
     unsigned x=word(body+5),y=word(body+8);
     for(unsigned entry=first;entry<end;entry+=2) {
       unsigned record=rom_word(entry);
-      if(record<0xe630 || record+8>=0xecd0 || x>=rom_word(record) ||
+      if(record<data || record+8>=0xecd0 || x>=rom_word(record) ||
           x<rom_word(record+2) || y>=rom_word(record+4) || y<rom_word(record+6)) continue;
       /* Same exclusive upper edges and byte command list as F6E0..F71D.
        * Only authored camera limits are copied; no guest script runs twice. */
