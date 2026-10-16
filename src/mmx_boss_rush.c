@@ -15,6 +15,9 @@ const MmxBossRushDefinition kMmxBossRushBosses[8]={
 };
 static MmxBossRushState state;
 static MmxBossRushVisualState visual;
+static bool enabled=true;
+void MmxBossRushSetEnabled(bool active) {enabled=active;}
+bool MmxBossRushEnabled(void) {return enabled;}
 void MmxBossRushReset(void) {memset(&state,0,sizeof(state));memset(&visual,0,sizeof(visual));}
 MmxBossRushVisualState MmxBossRushVisualGetState(void) {return visual;}
 bool MmxBossRushVisualValidState(const MmxBossRushVisualState *s) {

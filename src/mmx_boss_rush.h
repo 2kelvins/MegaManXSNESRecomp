@@ -50,6 +50,10 @@ typedef struct MmxBossRushDefinition {
   uint8_t kind, stage;
 } MmxBossRushDefinition;
 extern const MmxBossRushDefinition kMmxBossRushBosses[8];
+/* Session mod selection controls title-menu access. An already active run
+ * remains snapshot-owned until it ends or the game resets. */
+void MmxBossRushSetEnabled(bool enabled);
+bool MmxBossRushEnabled(void);
 void MmxBossRushReset(void);
 bool MmxBossRushActive(void);
 bool MmxBossRushCoop(void);
