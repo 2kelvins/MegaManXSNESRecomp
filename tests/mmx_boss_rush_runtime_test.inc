@@ -926,6 +926,7 @@ static void rush_projectile_defeat(unsigned seat,unsigned weapon) {
   }
   check(s.defeated==count+1,"native weapon finishing hit counts exactly one defeat");
 }
+#include "mmx_boss_rush_coop_combat_test.inc"
 static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual,size_t cap) {
   const char *coop_assets=getenv("MMX_BOSS_RUSH_COOP");
   const char *zero_assets=getenv("MMX_BOSS_RUSH_ZERO");
@@ -935,7 +936,7 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
   }
   if(coop_assets) {
     check(MmxZeroLoad(coop_assets),"co-op source assets load");MmxZeroRegisterHooks();
-    check(MmxCoopEnable(MMX_COOP_X),"co-op configuration starts as X");
+    check(MmxCoopEnable(getenv("MMX_BOSS_RUSH_COOP_P1_ZERO")?MMX_COOP_ZERO:MMX_COOP_X),"co-op configuration uses the selected P1 character");
     MmxCoopRegisterHooks();
   }
   for(unsigned t=0;t<1800 && !MmxBossRushGetState().menu;++t) {
@@ -1109,6 +1110,7 @@ static void rush_runtime_checks(uint8_t *start,uint8_t *expected,uint8_t *actual
     puts("MMX BOSS RUSH ARENA CHECKS PASSED");
     return;
   }
+  if(getenv("MMX_BOSS_RUSH_COOP_COMBAT_TEST")) {rush_coop_combat_checks(start,expected,cap);return;}
   if(getenv("MMX_BOSS_RUSH_MENU_TEST")) {rush_return_title_checks();return;}
   if(getenv("MMX_BOSS_RUSH_STATE_FORMAT_TEST")) {rush_state_format_checks(start,expected,actual,cap);return;}
   if(getenv("MMX_BOSS_RUSH_AUDIO_TEST")) {rush_audio_checks(start,cap);return;}
