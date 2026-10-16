@@ -11,6 +11,7 @@ static void boss_rush_policy_checks(const RecompLauncherCModProvider *p, const c
       visible=!feature.hidden;
   }
   check(visible,"Boss Rush is exposed in the netplay mod list");
+  check(p->commit_netplay(p->ctx,rom),"default Boss Rush match plan commits");
   snes_mod_runtime_activate_plugins_c();
   check(MmxBossRushEnabled(),"default Boss Rush plan activates its controller");
 
@@ -79,7 +80,10 @@ static void netplay_policy_checks(const char *root, const char *rom, const char 
   MmxNetplayConfigureLauncher(&gi);
   const RecompLauncherCModProvider *linked = gi.mods;
   RecompLauncherCModOption camera_option = {0};
-  check(!linked->feature_option_get(linked->ctx,coop,"coop",2,&camera_option) &&
+  int offline_camera=0;
+  for(int i=0;linked->feature_option_get(linked->ctx,coop,"coop",i,&camera_option);++i)
+    offline_camera|=!strcmp(camera_option.id,"cameras");
+  check(!offline_camera &&
       !linked->feature_set_option(linked->ctx,coop,"coop","cameras","independent"),
       "camera selection is unavailable offline");
   MmxCoopViewsSetIndependent(true); MmxBeforeFrame();
@@ -176,6 +180,7 @@ static void netplay_policy_checks(const char *root, const char *rom, const char 
   check(snes_mod_runtime_initialize_c(root, "megaman-x-us", digest), "reload persisted offline plan");
   snes_mod_runtime_effective_set_c(after, sizeof(after));
   check(!strcmp(offline, after), "netplay commits never overwrite the offline plan on disk");
+  check(base->commit(base->ctx,rom),"restored offline plan commits for launch");
   snes_mod_runtime_activate_plugins_c();
   check(MmxBossRushEnabled(),"offline default-on Boss Rush survives lobby edits and relaunch");
   puts("MMX NETPLAY POLICY CHECKS PASSED");
