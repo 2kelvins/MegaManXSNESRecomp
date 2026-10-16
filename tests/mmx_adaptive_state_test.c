@@ -14,7 +14,8 @@ static void check(int ok, const char *what) {
 static void frame(unsigned input) {
   MmxBeforeFrame();
   if(getenv("MMX_COOP_VIEWS_TEST") || getenv("MMX_COOP_VIEWS_BOOT_TEST") ||
-      getenv("MMX_COOP_ONLINE_FIXTURE")) MmxCoopViewsSetOnline(true);
+      getenv("MMX_COOP_ONLINE_FIXTURE") || getenv("MMX_COOP_LIFT_REPLAY_FIXTURE") ||
+      getenv("MMX_COOP_REGION_REPLAY_FIXTURE") || getenv("MMX_COOP_WRAP_REPLAY_FIXTURE")) MmxCoopViewsSetOnline(true);
   if(!MmxReplayPlaying() && getenv("MMX_REPLAY_TEST") && !strcmp(getenv("MMX_REPLAY_TEST"),"online")) {
     MmxCoopViewsSetIndependent(true);MmxCoopViewsSetOnline(true);MmxRendererSetPeerView(1);
   }
@@ -1951,6 +1952,15 @@ int main(int argc, char **argv) {
   if(getenv("MMX_BOSS_RUSH_TEST")) {rush_runtime_checks(start,expected,actual,cap);return 0;}
   const char *zero_assets = getenv("MMX_ZERO_TEST_ASSETS");
   const char *zero_title = getenv("MMX_ZERO_TITLE_FIXTURE");
+  if(getenv("MMX_COOP_LIFT_REPLAY_FIXTURE")) {
+    coop_eagle_replay_checks(zero_assets,getenv("MMX_COOP_LIFT_REPLAY_FIXTURE"),start,expected,actual,cap);return 0;
+  }
+  if(getenv("MMX_COOP_REGION_REPLAY_FIXTURE")) {
+    coop_region_replay_checks(zero_assets,getenv("MMX_COOP_REGION_REPLAY_FIXTURE"),start,expected,actual,cap);return 0;
+  }
+  if(getenv("MMX_COOP_WRAP_REPLAY_FIXTURE")) {
+    coop_region_replay_checks(zero_assets,getenv("MMX_COOP_WRAP_REPLAY_FIXTURE"),start,expected,actual,cap);return 0;
+  }
   if(getenv("MMX_REPLAY_TEST")) { diagnostic_replay_checks(zero_assets,getenv("MMX_REPLAY_TEST")); return 0; }
   if(getenv("MMX_COOP_VIEWS_BOOT_TEST")) {
     coop_view_boot_checks(zero_assets,start,expected,actual,cap);return 0;

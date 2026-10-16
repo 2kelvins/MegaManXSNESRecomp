@@ -55,6 +55,7 @@ enum { SEGMENT_FRAMES = 600, SEGMENTS = 360, STATE_LIMIT = 16*1024*1024,
        SNAPSHOT_LIMIT = 2*1024*1024 };
 static bool enabled, playing, finished, failed, pending;
 static bool recording;
+static unsigned playback_format;
 static SnesReplayWriter *writer;
 static FILE *stream, *states;
 static char stem[1200], path[1280];
@@ -139,6 +140,8 @@ static void hashes(uint32_t *w, uint32_t *c, uint32_t *v, uint32_t *p) {
   MmxCoopState coop=MmxCoopGetState();
   MmxCoopViewWorldState views=MmxCoopViewsGetWorldState();
   *w=hash(g_ram,0x20000); *c=hash(&coop,sizeof(coop)); *v=hash(&views,sizeof(views));
+  MmxCoopViewBoundsState bounds=MmxCoopViewsGetBoundsState();
+  if(playback_format>=3 && bounds.valid) *v=hash_continue(*v,&bounds,sizeof(bounds));
   *p=hash(g_ppu->vram,sizeof(g_ppu->vram));
 }
 static void error(const char *why) {
@@ -244,7 +247,7 @@ static bool start_segment(void) {
   snprintf(path,sizeof(path),"%s-%06u.replay",stem,segment);
   next_frame=(unsigned)snes_frame_counter;generation=RtlStateGeneration();
   char header[512];
-  snprintf(header,sizeof(header),"MMXREPLAY 2\nBUILD %s %s %s\nROM %08x\nMODS %u\n",
+  snprintf(header,sizeof(header),"MMXREPLAY 3\nBUILD %s %s %s\nROM %08x\nMODS %u\n",
       SNESRECOMP_BUILD_VERSION,MMX_REPLAY_REVISION,MMX_REPLAY_ENGINE,rom_identity,mods());
   /* Effective options are copied now; the worker owns all sidecar I/O. The
    * recorded lobby selection takes precedence over the offline preferences. */
@@ -274,15 +277,16 @@ bool MmxReplayPlayback(const char *name) {
 }
 static bool load_playback(void) {
   char line[512],version[80],revision[80],engine[80],sidecar[1400]; unsigned format,rom,selection;
-  if(!fgets(line,sizeof(line),stream) || sscanf(line,"MMXREPLAY %u",&format)!=1 || (format!=1 && format!=2) ||
+  if(!fgets(line,sizeof(line),stream) || sscanf(line,"MMXREPLAY %u",&format)!=1 || format<1 || format>3 ||
       !fgets(line,sizeof(line),stream) || sscanf(line,"BUILD %79s %79s %79s",version,revision,engine)!=3 ||
       !fgets(line,sizeof(line),stream) || sscanf(line,"ROM %x",&rom)!=1 ||
-      !g_snes || !g_snes->cart || (format==2 && rom!=rom_identity) ||
+      !g_snes || !g_snes->cart || (format>=2 && rom!=rom_identity) ||
       !fgets(line,sizeof(line),stream) || sscanf(line,"MODS %u",&selection)!=1) {
     error("invalid header or different ROM"); return false;
   }
   playback_rom=rom;
-  playback_rom_verified=format==2 || rom==hash(g_snes->cart->rom,g_snes->cart->romSize);
+  playback_format=format;
+  playback_rom_verified=format>=2 || rom==hash(g_snes->cart->rom,g_snes->cart->romSize);
   fprintf(stderr,"[mmx-replay] recorded build %s revision %s engine %s; replay build %s revision %s engine %s\n",
       version,revision,engine,SNESRECOMP_BUILD_VERSION,MMX_REPLAY_REVISION,MMX_REPLAY_ENGINE);
   if(selection!=mods()) { error("enable the recorded character, controls, weapons and co-op mods before replay"); return false; }
@@ -438,9 +442,13 @@ void MmxReplayEnd(void) {
     }
   } else if(recording) {
     MmxCoopState coop=MmxCoopGetState();
-    MmxCoopViewWorldState views=MmxCoopViewsGetWorldState();
+    MmxCoopViewWorldState world=MmxCoopViewsGetWorldState();
+    MmxCoopViewBoundsState bounds=MmxCoopViewsGetBoundsState();
+    uint8_t views[sizeof(world)+sizeof(bounds)];
+    memcpy(views,&world,sizeof(world));memcpy(views+sizeof(world),&bounds,sizeof(bounds));
+    size_t view_size=bounds.valid?sizeof(views):sizeof(world);
     if(!SnesReplayWriterFrame(writer,(unsigned)snes_frame_counter,g_ram,0x20000,
-        &coop,sizeof(coop),&views,sizeof(views),g_ppu->vram,sizeof(g_ppu->vram)))
+        &coop,sizeof(coop),&views,view_size,g_ppu->vram,sizeof(g_ppu->vram)))
       error(SnesReplayWriterError(writer));
     ++rows;
   }

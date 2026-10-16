@@ -685,6 +685,30 @@ static void spark_effects(void) {
   assert(output[90 * v.width + v.extra + 500] == 0xffffff);
   assert(output[103 * v.width + v.extra + 500] == 0);
   assert(output[90 * v.width + v.extra + 616] == 0);
+  /* The fading beam stores its top in the native camera's screen space
+   * ($87:A6ED/A7AE). It must follow the same world position in either view. */
+  put_word(0x1e50,256);ppu.vScroll[0]=256;
+  put_word(0x1e58,2048);put_word(0x1e5c,2048);
+  MmxCoopViewsSetOnline(true);
+  for(unsigned anchor=0;anchor<2;++anchor) for(int dy=-64;dy<=64;dy+=64) {
+    MmxCoopState s={0};s.initialized=1;s.current=s.anchor=(uint8_t)anchor;
+    for(unsigned seat=0;seat<2;++seat) {
+      s.players[seat].status=MMX_COOP_ALIVE;s.players[seat].body[0x27]=32;
+      unsigned y=416+(seat==anchor?0:dy);
+      s.players[seat].body[5]=128;
+      s.players[seat].body[8]=(uint8_t)y;s.players[seat].body[9]=(uint8_t)(y>>8);
+    }
+    memcpy(ram+0xba8,s.players[anchor].body,0x90);
+    capture();MmxRendererCoopFrame(&s);
+    for(unsigned seat=0;seat<2;++seat) {
+      MmxRendererSetPeerView((int)seat);assert(MmxRendererDraw(output,v,false));
+      int top=90-(seat==anchor?0:dy);
+      for(int y=0;y<224;++y) assert(output[y*v.width+v.extra+500]==
+          (y>=top && y<top+13?0xffffffu:0u));
+    }
+  }
+  MmxRendererSetPeerView(-1);MmxCoopViewsSetOnline(false);
+  memset(ram+0xba8,0,0x90);put_word(0x1e50,0);ppu.vScroll[0]=0;
   /* Thunder Slimer's BG2 surface reaches the margins from live VRAM, never
    * from the stage map's dormant staging tiles. */
   memset(ram + 0xe68, 0, 128); ram[0x1f0a] = 1;
