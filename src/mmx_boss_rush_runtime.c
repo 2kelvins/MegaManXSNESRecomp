@@ -43,6 +43,10 @@ static const uint16_t globals[]={0x1f0c,0x1f0e,0x1f0f,0x1f13,0x1f14,0x1f15,
   0x1e5c,0x1e5d,0x1e5e,0x1e5f,0x1e60,0x1e61,0x1e62,0x1e63,
   0xc0,0xc1,0xc9,0xca,0xcb,0xcc,0xcd,
   0xc0c,0xbd8,0x1e54,0x1e55,0x1e74,0x1e75,0x1e76,0x1e77};
+/* Keep the $0BD8 array slot for existing snapshots, but never swap it:
+ * it is the projected player's hurt latch, not a boss scene flag. Restoring
+ * a boss's stale zero clears the world player's protection after contact. */
+static bool private_global(unsigned i) {return globals[i]!=0xbd8;}
 static bool playing(void) {return MmxBossRushGetState().mode==MMX_RUSH_PLAYING;}
 static void equipment(uint8_t *r);
 static unsigned object_step(unsigned d) {return d<0x1628?64:d<0x1928?48:32;}
@@ -67,6 +71,7 @@ static void actor_hook(CpuState *cpu,uint32_t pc) {
       d+=object_step(d);
     }
     for(unsigned i=0;i<sizeof(globals)/sizeof(*globals);++i) {
+      if(!private_global(i)) continue;
       s.bosses[owner].globals[i]=g_ram[globals[i]];g_ram[globals[i]]=s.globals[i];
     }
     s.actor=0;MmxBossRushSetState(&s);return;
@@ -79,6 +84,7 @@ static void actor_hook(CpuState *cpu,uint32_t pc) {
   }
   s.actor=(uint8_t)(owner+1);s.actor_object=cpu->D;s.actor_s=cpu->S;
   for(unsigned i=0;i<sizeof(globals)/sizeof(*globals);++i) {
+    if(!private_global(i)) continue;
     s.globals[i]=g_ram[globals[i]];g_ram[globals[i]]=s.bosses[owner].globals[i];
   }
   remember_objects(&s);
