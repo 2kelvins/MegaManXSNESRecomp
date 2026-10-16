@@ -427,6 +427,15 @@ void MmxBossRushFrame(uint8_t *r,uint16_t input) {
   MmxBossRushState s=MmxBossRushGetState();unsigned pressed=input&~s.input;s.input=input;
   if(s.mode!=MMX_RUSH_OFF) MmxBossRushAudioTick();
   if(s.mode==MMX_RUSH_OFF) {
+    if(!MmxBossRushEnabled()) {
+      /* A launcher edit can disable the fourth row while it is selected.
+       * Return the native cursor to Option Mode before its three-row table
+       * runs again. Keep input history consistent with ordinary frames. */
+      if(s.menu && title(r) && s.selection==3) {
+        put(r+0xbb0,198);r[0x3c]=2;memset(r+0xac,0,4);
+      }
+      s.menu=0;s.selection=0;s.menu_input=input;MmxBossRushSetState(&s);return;
+    }
     if(!title(r)) {s.menu=0;s.menu_input=input;MmxBossRushSetState(&s);return;}
     /* Old playtest snapshots may contain the removed mode submenu. */
     if(s.menu==2) s.selection=3;

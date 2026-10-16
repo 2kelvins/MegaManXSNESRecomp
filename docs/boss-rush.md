@@ -1,6 +1,11 @@
 # Endless Boss Rush
 
-Boss Rush adds a fourth entry to the USA game's title menu. It starts directly
+The **Boss Rush** mod is enabled by default under **Game Modes** in the launcher
+and the netplay lobby. It adds a fourth entry to the USA game's title menu;
+turning it off restores the original three choices. The host's selection is
+part of the synchronized mod plan for both players. Start the session and
+choose **Boss Rush** on the in-game title screen to play online.
+It starts directly
 in solo or co-op according to the launcher's existing X + Zero mod setting.
 Co-op uses that mod's owner-supplied X3 assets.
 The arena starts with full health, all native X1 weapons, maximum health and
