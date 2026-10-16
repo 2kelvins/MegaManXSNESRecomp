@@ -99,14 +99,29 @@ def main():
         assert sum(line.startswith("S ") for line in capture.read_text().splitlines()) == 3, \
             "capture needs initial, backward rollback and same-frame restore checkpoints"
         run(f"fresh-{mode}", settings | {"MMX_REPLAY_INPUT": str(capture)}, contains="90 executions")
+        if mode == "online":
+            damaged = work / "bad-view-history.replay"
+            lines = capture.read_text().splitlines()
+            i = next(i for i, line in enumerate(lines) if line.startswith("H "))
+            fields = lines[i].split()
+            fields[4] = f"{int(fields[4], 16)^1:08x}"
+            lines[i] = " ".join(fields)
+            damaged.write_text("\n".join(lines) + "\n")
+            shutil.copy2(str(capture) + ".sav", str(damaged) + ".sav")
+            run("bad-view-history", settings | {"MMX_REPLAY_INPUT": str(damaged)},
+                good=False, contains="FIRST DIVERGENCE")
         if mode != "solo":
             continue
         original = capture.read_text()
-        assert original.startswith("MMXREPLAY 2\n"), "new recordings use the stable source-ROM identity"
+        assert original.startswith("MMXREPLAY 3\n"), "new recordings include independent camera history"
         legacy = work / "legacy.replay"
-        legacy.write_text(original.replace("MMXREPLAY 2\n", "MMXREPLAY 1\n", 1))
+        legacy.write_text(original.replace("MMXREPLAY 3\n", "MMXREPLAY 1\n", 1))
         shutil.copy2(str(capture) + ".sav", str(legacy) + ".sav")
         run("legacy", settings | {"MMX_REPLAY_INPUT": str(legacy)}, contains="90 executions")
+        legacy_v2 = work / "legacy-v2.replay"
+        legacy_v2.write_text(original.replace("MMXREPLAY 3\n", "MMXREPLAY 2\n", 1))
+        shutil.copy2(str(capture) + ".sav", str(legacy_v2) + ".sav")
+        run("legacy-v2", settings | {"MMX_REPLAY_INPUT": str(legacy_v2)}, contains="90 executions")
         for label in ("truncated", "bad-hash", "bad-checkpoint", "wrong-rom", "legacy-wrong-rom", "empty"):
             damaged = work / (label + ".replay")
             text = original

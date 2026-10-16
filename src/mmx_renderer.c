@@ -61,6 +61,7 @@ static MmxZeroState frame_zero;
 static MmxWeaponsState frame_weapons;
 static MmxWeaponCombatState frame_weapon_combat;
 static MmxCoopState frame_coop;
+static MmxCoopViewBoundsState frame_bounds;
 static bool frame_held;
 static int peer_seat=-1,view_dx,view_dy;
 void MmxRendererSetPeerView(int seat) { peer_seat=seat>=0 && seat<2?seat:-1; }
@@ -160,6 +161,7 @@ static const uint8_t *rom_at(unsigned address, size_t length) {
 }
 void MmxRendererSetRom(const uint8_t *bytes, size_t length) {
   rom = bytes; rom_size = length; MmxRenderAssetsSetRom(bytes, length);
+  MmxCoopViewsSetRom(bytes,length);
   MmxRenderAssetsPreloadRush();
 }
 void MmxRendererSetPlayerOverlayProvider(
@@ -454,6 +456,7 @@ void MmxRendererBeginFrame(const uint8_t ram[0x20000]) {
   frame.valid = false; frame.captured = 0;
   memcpy(frame.ram, ram, sizeof(frame.ram));
   frame_zero = MmxZeroGetState();
+  frame_bounds=MmxCoopViewsGetBoundsState();
   frame_weapons = MmxWeaponsGetState();
   frame_weapon_combat = MmxWeaponsGetCombatState();
   if ((frame_held || MmxZeroSwapping() || MmxWeaponsTimeActive()) && !latched_count) {
@@ -728,9 +731,9 @@ bool MmxRendererSaveCapture(const char *path) {
   if (!frame.valid || !path) return false;
   FILE *f = fopen(path, "wb");
   if (!f) return false;
-  uint32_t header[] = {0x4d4d5843, frame_coop.initialized ? 21 : 20,
+  uint32_t header[] = {0x4d4d5843, frame_coop.initialized ? 23 : 22,
       sizeof(frame) + sizeof(frame_zero) + sizeof(frame_weapons) + sizeof(frame_weapon_combat) +
-      (frame_coop.initialized ? sizeof(frame_coop) : 0) + sizeof(frame_rush) + sizeof(frame_rush_visual)};
+      (frame_coop.initialized ? sizeof(frame_coop) : 0) + sizeof(frame_rush) + sizeof(frame_rush_visual)+sizeof(frame_bounds)};
   bool ok = fwrite(header, sizeof(header), 1, f) == 1 && fwrite(&frame, sizeof(frame), 1, f) == 1 &&
       fwrite(&frame_zero, sizeof(frame_zero), 1, f) == 1 &&
       fwrite(&frame_weapons, sizeof(frame_weapons), 1, f) == 1 &&
@@ -738,6 +741,7 @@ bool MmxRendererSaveCapture(const char *path) {
   if (ok && frame_coop.initialized) ok = fwrite(&frame_coop,sizeof(frame_coop),1,f) == 1;
   if(ok) ok=fwrite(&frame_rush,sizeof(frame_rush),1,f)==1;
   if(ok) ok=fwrite(&frame_rush_visual,sizeof(frame_rush_visual),1,f)==1;
+  if(ok) ok=fwrite(&frame_bounds,sizeof(frame_bounds),1,f)==1;
   return fclose(f) == 0 && ok;
 }
 bool MmxRendererLoadCapture(const char *path) {
@@ -751,6 +755,7 @@ bool MmxRendererLoadCapture(const char *path) {
   memset(&frame_weapons, 0, sizeof(frame_weapons));
   memset(&frame_weapon_combat, 0, sizeof(frame_weapon_combat));
   memset(&frame_coop,0,sizeof(frame_coop));
+  memset(&frame_bounds,0,sizeof(frame_bounds));
   memset(&frame_rush,0,sizeof(frame_rush));
   memset(&frame_rush_visual,0,sizeof(frame_rush_visual));
   bool ok = fread(h, sizeof(h), 1, f) == 1 && h[0] == 0x4d4d5843 &&
@@ -768,7 +773,7 @@ bool MmxRendererLoadCapture(const char *path) {
        (h[1] == 14 && h[2] == sizeof(frame) + sizeof(frame_zero) + sizeof(frame_weapons) + sizeof(frame_weapon_combat)) ||
        ((h[1] == 15 || h[1] == 17) && h[2] == sizeof(frame) + sizeof(frame_zero) + sizeof(frame_weapons) + sizeof(frame_weapon_combat) + sizeof(frame_coop)) ||
        (h[1] == 16 && h[2] == sizeof(frame) + sizeof(frame_zero) + sizeof(frame_weapons) + sizeof(frame_weapon_combat)) ||
-       ((h[1]>=18 && h[1]<=21) && h[2]==sizeof(frame)+sizeof(frame_zero)+sizeof(frame_weapons)+sizeof(frame_weapon_combat)+sizeof(frame_rush)+((h[1]&1)?sizeof(frame_coop):0)+(h[1]>=20?sizeof(frame_rush_visual):0))) &&
+       ((h[1]>=18 && h[1]<=23) && h[2]==sizeof(frame)+sizeof(frame_zero)+sizeof(frame_weapons)+sizeof(frame_weapon_combat)+sizeof(frame_rush)+((h[1]&1)?sizeof(frame_coop):0)+(h[1]>=20?sizeof(frame_rush_visual):0)+(h[1]>=22?sizeof(frame_bounds):0))) &&
       fread(&frame, sizeof(frame), 1, f) == 1 &&
       frame.captured == 224 && frame.piece_count <= MAX_PIECES && frame.expanded_count <= MAX_PIECES && frame.valid;
   size_t zero_size = h[1] == 3 ? MMX_ZERO_LEGACY_STATE_SIZE :
@@ -801,7 +806,7 @@ bool MmxRendererLoadCapture(const char *path) {
       }
     }
   }
-  if (ok && (h[1] == 13 || h[1] == 15 || h[1] == 17 || h[1]==19 || h[1]==21)) {
+  if (ok && (h[1] == 13 || h[1] == 15 || h[1] == 17 || h[1]==19 || h[1]==21 || h[1]==23)) {
     MmxCoopState coop;
     if (h[1] == 13) {
       uint8_t legacy[MMX_COOP_LEGACY_STATE_SIZE];
@@ -816,6 +821,7 @@ bool MmxRendererLoadCapture(const char *path) {
   }
   if(ok && h[1]>=18) ok=fread(&frame_rush,sizeof(frame_rush),1,f)==1 && MmxBossRushValidState(&frame_rush);
   if(ok && h[1]>=20) ok=fread(&frame_rush_visual,sizeof(frame_rush_visual),1,f)==1 && MmxBossRushVisualValidState(&frame_rush_visual);
+  if(ok && h[1]>=22) ok=fread(&frame_bounds,sizeof(frame_bounds),1,f)==1 && MmxCoopViewsValidBoundsState(&frame_bounds);
   ok = ok && fgetc(f) == EOF;
   fclose(f); frame.valid = ok; return ok;
 }
@@ -1214,7 +1220,9 @@ static unsigned spark_lights(LightBeam beams[2], int extra) {
         (r[d + 0x2d] != 0x40 && r[d + 0x2d] != 0x80)) continue;
     bool right = r[d + 0x0b] == 1, fading = r[d + 3] != 0;
     int tip = (int16_t)(word(r, d + 0x22) - camera_x) + (right ? -24 : 24);
-    int top = fading ? (int16_t)word(r, d + 0x36) :
+    /* A fading beam keeps the native screen-space top cached at A6F7.
+     * Its world position still needs the peer camera's vertical offset. */
+    int top = fading ? (int16_t)word(r, d + 0x36) - view_dy :
         (int16_t)(word(r, d + 0x24) - camera_y) - 24;
     unsigned height = fading ? r[d + 0x3b] : 49;
     int inset = fading ? r[d + 0x1f] : 0;
@@ -1827,7 +1835,7 @@ bool MmxRendererDraw(uint32_t *out, MmxRenderView view, bool hud) {
   bool rush_hud = stage && frame_rush.loaded;
   view_dx=view_dy=0;
   if(stage && peer_seat>=0 && frame_coop.initialized && MmxCoopViewsOnline()) {
-    MmxCoopView camera=MmxCoopViewForPlayer(frame.ram,&frame_coop,(unsigned)peer_seat);
+    MmxCoopView camera=MmxCoopViewWithBounds(frame.ram,&frame_coop,(unsigned)peer_seat,&frame_bounds);
     view_dx=camera.x-(int)word(frame.ram,0x1e4d);
     view_dy=camera.y-(int)word(frame.ram,0x1e50);
   }
@@ -2179,7 +2187,16 @@ bool MmxRendererDraw(uint32_t *out, MmxRenderView view, bool hud) {
       bool zero_icon = (stage || zero_menu) && MmxZeroEnabled() && !frame_zero.active_x && slot == 0 &&
           x == 8 && sy == 80 && attr == 0x3486 && size == 16;
       bool anchored = stage && hud && sy < 96 && (slot < 16 || (bar_count >= 4 && slot >= bar_first && slot < bar_first + bar_count));
-      if(stage && !anchored) {x-=view_dx;sy-=view_dy;}
+      bool reprojected = stage && !anchored && (view_dx || view_dy);
+      if(reprojected) {
+        /* OAM hides unused slots below the native viewport while retaining
+         * their old tiles. Moving those slots into a distant peer view would
+         * resurrect stale player/platform strips. A genuine top-edge sprite
+         * wraps past y=255; unwrap it before applying the world-view offset. */
+        if(sy>=224 && sy+size<=256) continue;
+        if(sy>=224) sy-=256;
+        x-=view_dx;sy-=view_dy;
+      }
       if (anchored) { if (x < 25) x -= view.extra; else if (x >= 216) x += view.extra; }
       if (stage && frame_weapons.page && frame_weapons.weapon && slot == 7 && (pos & 255) == 24 && sy == 80 && attr == 0x3620) {
         /* Dedicated source gameplay footer, with its original frame,
@@ -2196,7 +2213,7 @@ bool MmxRendererDraw(uint32_t *out, MmxRenderView view, bool hud) {
         }
         continue;
       }
-      sprite(&p, r, x, sy, attr, size, y, view, objects, false, NULL, 0, object_colors, false, zero_icon, false);
+      sprite(&p, r, x, sy, attr, size, y, view, objects, false, NULL, 0, object_colors, reprojected, zero_icon, false);
     }
     if (charge && zero_drawn[0] && !swapping) {
       int zx=(int16_t)(word(frame.ram,0xbad)-view_camera(frame.ram,0x1e4d));

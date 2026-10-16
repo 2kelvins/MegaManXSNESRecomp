@@ -367,7 +367,7 @@ void mmx_host_yield(uint8_t countdown) {
 #include "snes/saveload.h"
 
 #define MMX_SAV_CHUNK_MAGIC   0x4D4D5854u  /* "MMXT" */
-#define MMX_SAV_CHUNK_VERSION 21u /* main's Zero extension plus Boss Rush tails */
+#define MMX_SAV_CHUNK_VERSION 22u /* per-seat authored camera bounds */
 
 typedef struct MmxSavChunk {
   uint32_t magic, version;
@@ -403,6 +403,7 @@ static MmxWeaponCombatState g_load_weapon_combat;
 static MmxCoopState g_load_coop;
 static MmxKncBugfixState g_load_knc_bugfix;
 static MmxCoopViewWorldState g_load_views;
+static MmxCoopViewBoundsState g_load_view_bounds;
 static uint8_t g_load_zero_extension[MMX_ZERO_EXTENSION_STATE_BYTES];
 static MmxBossRushState g_load_rush;
 static MmxBossRushAudioState g_load_rush_audio;
@@ -463,6 +464,8 @@ void MmxStateSaveExtra(struct SaveLoadInfo *sli) {
   sli->func(sli,&audio,sizeof(audio));
   MmxBossRushVisualState visual=MmxBossRushVisualGetState();
   sli->func(sli,&visual,sizeof(visual));
+  MmxCoopViewBoundsState bounds=MmxCoopViewsGetBoundsState();
+  sli->func(sli,&bounds,sizeof(bounds));
 }
 
 void MmxStateLoadExtra(struct SaveLoadInfo *sli, uint32_t version) {
@@ -475,6 +478,7 @@ void MmxStateLoadExtra(struct SaveLoadInfo *sli, uint32_t version) {
   memset(&g_load_coop, 0, sizeof(g_load_coop));
   memset(&g_load_knc_bugfix,0,sizeof(g_load_knc_bugfix));
   memset(&g_load_views,0,sizeof(g_load_views));
+  memset(&g_load_view_bounds,0,sizeof(g_load_view_bounds));
   memset(g_load_zero_extension,0,sizeof(g_load_zero_extension));
   memset(&g_load_rush,0,sizeof(g_load_rush));
   memset(&g_load_rush_audio,0,sizeof(g_load_rush_audio));
@@ -562,7 +566,8 @@ void MmxStateLoadExtra(struct SaveLoadInfo *sli, uint32_t version) {
     bool extension=g_load_chunk.version>=21 ||
         (g_load_chunk.version==18 && remaining==sizeof(g_load_zero_extension));
     bool rush=g_load_chunk.version>=21 || !extension;
-    size_t expected=(extension?sizeof(g_load_zero_extension):0)+(rush?rush_bytes:0);
+    size_t expected=(extension?sizeof(g_load_zero_extension):0)+(rush?rush_bytes:0)+
+        (g_load_chunk.version>=22?sizeof(g_load_view_bounds):0);
     if(remaining!=expected) g_load_chunk_ok=0;
     if(g_load_chunk_ok && extension)
       sli->func(sli,g_load_zero_extension,sizeof(g_load_zero_extension));
@@ -577,6 +582,10 @@ void MmxStateLoadExtra(struct SaveLoadInfo *sli, uint32_t version) {
     if(g_load_chunk_ok && rush && g_load_chunk.version>=20) {
       sli->func(sli,&g_load_rush_visual,sizeof(g_load_rush_visual));
       if(!MmxBossRushVisualValidState(&g_load_rush_visual)) g_load_chunk_ok=0;
+    }
+    if(g_load_chunk_ok && g_load_chunk.version>=22) {
+      sli->func(sli,&g_load_view_bounds,sizeof(g_load_view_bounds));
+      if(!MmxCoopViewsValidBoundsState(&g_load_view_bounds)) g_load_chunk_ok=0;
     }
   }
   if(g_load_complete && g_load_chunk.version<16)
@@ -623,6 +632,7 @@ void MmxOnStateLoaded(uint32_t version) {
   if (complete && g_load_chunk.version >= 14) MmxCoopSetState(&g_load_coop);
   else MmxCoopReset();
   MmxCoopViewsSetWorldState(&g_load_views);
+  MmxCoopViewsSetBoundsState(&g_load_view_bounds);
   MmxCoopTraceStateLoaded();
   if (version < 5 || !g_load_chunk_ok) {
     /* Legacy v4 save: no chunk, no rebuild — preserve the historical

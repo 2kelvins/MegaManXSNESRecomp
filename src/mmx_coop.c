@@ -546,6 +546,10 @@ bool MmxCoopFrameTick(uint8_t *r) {
     }
   }
   select_world_survivor(r);
+  /* Older saves can retain the pre-handoff seat after an enemy starts a
+   * scene for its partner. Project the owner before teleport_tick edits the
+   * stored partner: capturing that partner again would reset its progress. */
+  if(state.scene_owner && state.current!=state.anchor) MmxCoopSelect(r,state.anchor);
   if((r[0xbcf]&127) && !(state.players[state.anchor^1].body[0x27]&127)) {
     /* Repair old co-op saves made after Penguin saw a dead world actor.
      * His combat state writes .30 only at $81:B6ED (player-dead latch).
@@ -570,6 +574,7 @@ bool MmxCoopFrameTick(uint8_t *r) {
   if (scene_tick(r)) return true;
   if (!state.scene_owner && join_tick(r)) return true;
   if (r[0x1f10]>=6) return false;
+  MmxCoopViewsUpdateBounds(r,&state);
   unsigned phases[2]={0,0};
   for (unsigned seat=0;seat<2;++seat) if (state.players[seat].status==MMX_COOP_ALIVE &&
       (!state.scene_owner || seat==state.anchor)) {
@@ -1980,14 +1985,15 @@ static void constrain_player(uint8_t *r) {
     /* Native camera clamping only sees the world actor. Clamp each
      * controller against the same authored room bounds before averaging.
      * Treat left-edge underflow as negative, not as a jump to $FFFF. */
-    int x=(int16_t)word(r+0xbad),lo=word(r+0x1e56)+8,hi=word(r+0x1e58)+248;
+    int limits[4];MmxCoopViewsPlayerLimits(r,&state,state.current,limits);
+    int x=(int16_t)word(r+0xbad),lo=limits[0]+8,hi=limits[1]+248;
     if(hi<lo) return;
     int limited=x<lo?lo:x>hi?hi:x;
     if(x!=limited) {putword(r+0xbad,(unsigned)limited);r[0xbac]=0;putword(r+0xbc2,0);}
     /* A partner can reach the authored pit edge while the native camera is
      * still far above it, so E12D's canonical-camera branch may never run. */
     if(independent && (r[0xbcf]&127) && r[0xbaa]!=12 &&
-        (int16_t)(word(r+0xbb0)-32-word(r+0x1e5c)-224)>=0) {
+        (int16_t)(word(r+0xbb0)-32-limits[3]-224)>=0) {
       ++r[0xbd8];r[0xbd7]=8;r[0xbce]=127;r[0xbaa]=r[0xc12]=12;r[0xbab]=0;r[0xbcf]=128;
     }
     if(independent) return;
@@ -2007,12 +2013,13 @@ static void camera_hook(CpuState *cpu,uint32_t pc) {
      * sound and orb objects; the shared camera still runs only once. */
     if (!enabled || !state.initialized || state.menu_owner || state.scene_owner || MmxCoopTransitionActive()) return;
     MmxCoopPlayer *p=&state.players[state.anchor^1];
+    int limits[4];MmxCoopViewsPlayerLimits(g_ram,&state,state.anchor^1,limits);
     /* Below the level's lowest camera position, as online views already
      * use: the screen bottom only moved because the shared camera was pulled
      * up (a capsule's camera lock), and scene_tick beams him over. */
     /* While a script holds the world actor, scene_tick beams him instead. */
     if (p->status==MMX_COOP_ALIVE && (p->body[0x27]&127) && !world_scripted(g_ram) &&
-        (int16_t)(word(p->body+8)-32-(word(g_ram+0x1e5c)+224))>=0) {
+        (int16_t)(word(p->body+8)-32-(limits[3]+224))>=0) {
       TRACE(PIT,pc,state.anchor^1,0,cpu);
       ++p->body[0x30];p->body[0x2f]=8;p->body[0x26]=127;
       p->body[2]=p->body[0x6a]=12;p->body[3]=0;p->body[0x27]=128;
@@ -2251,6 +2258,36 @@ static void view_world_hook(CpuState *cpu,uint32_t pc) {
   if(at==0x80c3) interp_bridge_pre_opcode_redirect(outside?0x8280d4:0x8280d9);
   if(at==0x8957) interp_bridge_pre_opcode_redirect(0x838966);
 }
+/* Armadillo's map wrap ($81:F9B7) rebases the native body, its previous
+ * position, charge objects and shots. The stored partner needs the same
+ * mapping; otherwise the next clamp teleports only X and leaves Y behind. */
+static void mine_wrap_hook(CpuState *cpu,uint32_t pc) {
+  (void)cpu;
+  if(!enabled || !state.initialized || g_ram[0x1f7a]!=3) return;
+  if((pc&65535)==0xfa13) {
+    MmxCoopCapture(g_ram);
+    MmxCoopPlayer *p=&state.players[state.current^1];
+    unsigned x=word(g_ram),y=word(g_ram+2);
+    if(p->status==MMX_COOP_ALIVE && (p->body[0x27]&127)) {
+      putword(p->body+5,(uint16_t)(word(p->body+5)-x)|0x100);
+      putword(p->body+8,(uint16_t)(word(p->body+8)-y)|0x800);
+      memcpy(p->body+0x22,p->body+5,2);memcpy(p->body+0x24,p->body+8,2);
+      for(unsigned d=0x60;d<sizeof(p->auxiliaries);d+=32) {
+        uint8_t *a=p->auxiliaries+d;
+        putword(a+5,(uint16_t)(word(a+5)-x)|0x100);
+        putword(a+8,(uint16_t)(word(a+8)-y)|0x800);
+        /* These are 32-byte objects, without the 64-byte shots' previous
+         * position fields. Never write across the private pool boundary. */
+      }
+      for(unsigned d=0;d<sizeof(p->shots);d+=64) {
+        uint8_t *a=p->shots+d;
+        putword(a+5,word(a+5)-x+0x100);putword(a+8,word(a+8)-y+0x800);
+        memcpy(a+0x22,a+5,2);memcpy(a+0x24,a+8,2);
+      }
+    }
+    MmxCoopViewBoundsState fresh={0};MmxCoopViewsSetBoundsState(&fresh);
+  }
+}
 /* Couch co-op runs enemy AI against the projected world actor. Enemies that
  * act on the body they chase also need the nearest player there: Launch
  * Octopus's Gulpfer ($1D) homes in on and swallows $0BA8, so it never went
@@ -2297,7 +2334,10 @@ static void view_actor_hook(CpuState *cpu,uint32_t pc) {
         g_ram[cpu->D+0x3f]=(uint8_t)(state.current+1);
       if(couch_nearest_target(cpu->D) && g_ram[cpu->D+10]==0x40)
         g_ram[cpu->D+0x3f]=g_ram[cpu->D+1]==4 ? (uint8_t)(state.current+1) : 0;
-      MmxCoopSelect(g_ram,world.actor_return-1);MmxCoopViewsActorReturn(0);
+      /* A nearest-player update can transfer scene ownership (Eagle's lift).
+       * Its new owner must keep the physical body after this return too. */
+      unsigned restore=state.scene_owner ? state.anchor : world.actor_return-1;
+      MmxCoopSelect(g_ram,restore);MmxCoopViewsActorReturn(0);
       select_world_survivor(g_ram);
     }
     return;
@@ -2345,6 +2385,7 @@ static void view_actor_hook(CpuState *cpu,uint32_t pc) {
   MmxCoopViewsActorReturn(state.current+1);MmxCoopSelect(g_ram,nearest);
 }
 void MmxCoopRegisterHooks(void) {
+  interp_bridge_set_pre_opcode_hook(0x81fa13,mine_wrap_hook);
   const unsigned actors[]={0xd4f6,0xd4f9,0xd515,0xd522,0xd499,0xd49c,0xd4b8,0xd4c5};
   for(unsigned i=0;i<sizeof(actors)/sizeof(actors[0]);++i)
     interp_bridge_set_pre_opcode_hook(actors[i],view_actor_hook);
