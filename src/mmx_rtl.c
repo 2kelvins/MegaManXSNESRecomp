@@ -1357,6 +1357,13 @@ int MmxWsSpawnRecordAllowed(uint16 dpage, uint8 type) {
   uint16 rec = MmxWsSpawnReadCursor(dpage);
   uint8 *descriptor = RomPtr(0x850000u | rec);
   const uint8 object_id = descriptor[3];
+  /* The Storm Eagle heart shares the chain platforms' allocator. Loading it
+   * into a wide margin while those ten slots are occupied changes its slot,
+   * even if the platform switches themselves keep native timing. Solo's
+   * phantom grab needs the heart's original scan as well; the native cursor
+   * and guest live/collected flags remain authoritative. */
+  if (!MmxCoopEnabled() && g_ram[0x1f7a] == 5 && kind == 0 && object_id == 0x0b)
+    return !s_ws_spawn_pass.visible_rescan && anchor == s_ws_spawn_pass.native_anchor;
   if (s_ws_spawn_pass.capsule_rescan) return kind == 3 && object_id == 0x4d;
   if (s_ws_spawn_pass.visible_rescan)
     return MmxWidePolicy_RescanSpawnRecord(g_ram[0x1f7a], kind, object_id);
@@ -1562,6 +1569,12 @@ void MmxWsStreakerEntrance(uint16 object) {
 }
 
 uint16 MmxWsChainPlatformLine(CpuState *cpu, uint16 line) {
+  /* These switches allocate/free ten objects in the same pool as Heart
+   * Tanks. Early activation changes both the lift cycle and which slot is
+   * reused when a Boomerang delivers the heart (the Magic Carpet phantom
+   * grab). Keep the guest's activation points in solo play. Co-op retains
+   * its existing widened platform support for the two-player field. */
+  if (!MmxCoopEnabled()) return line;
   if (!g_mmx_custom_renderer || !MmxWsSpawnWide() || cpu->X != 5) return line;
   unsigned margin = MmxWsMargin();
   uint16 adjusted = MmxWidePolicy_ChainPlatformLine(g_ram, cpu->D, line, margin);
