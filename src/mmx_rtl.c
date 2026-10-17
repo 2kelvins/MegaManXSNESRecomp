@@ -1464,6 +1464,21 @@ void MmxWsCollectiblePass(CpuState *cpu) {
 }
 
 static bool s_view_spawn_pass;
+/* The widescreen spawn scan keeps Sigma 1's allocation-sensitive Vile room at
+ * native timing (MmxWsForceNativeSpawnTiming); the per-view scan must too, for
+ * every view: either player's camera can approach the room. Ordinary enemies
+ * reach 64px plus the render margin beyond the native spawn column. */
+static bool MmxViewNativeTiming(const MmxCoopState *coop) {
+  unsigned lookahead=64+(unsigned)g_mmx_custom_view.extra;
+  uint8_t stage=g_ram[0x1f7a];
+  if(MmxWidePolicy_ForceNativeSpawnTiming(stage,(uint16_t)(g_ram[0x1e4d]|g_ram[0x1e4e]<<8),lookahead))
+    return true;
+  for(unsigned seat=0;seat<2;++seat) {
+    MmxCoopView v=MmxCoopViewForPlayer(g_ram,coop,seat);
+    if(v.x>=0 && MmxWidePolicy_ForceNativeSpawnTiming(stage,(uint16_t)v.x,lookahead)) return true;
+  }
+  return false;
+}
 static bool MmxViewRecordWanted(unsigned flag,const MmxCoopState *coop) {
   if(flag<0xfa00 || flag>0xfffb) return false;
   unsigned rec=g_ram[flag+3]|g_ram[flag+4]<<8;
@@ -1474,7 +1489,7 @@ static bool MmxViewRecordWanted(unsigned flag,const MmxCoopState *coop) {
   if(kind>3) return false;
   /* Mechanisms, doors and encounter controllers retain their native entry
    * timing around a player. Ordinary enemies get the usual spawn hysteresis. */
-  bool scripted=kind!=3 || MmxWidePolicy_IsBossEncounter(desc[3]);
+  bool scripted=kind!=3 || MmxWidePolicy_IsScriptedEncounter(desc[3]) || MmxViewNativeTiming(coop);
   return MmxCoopViewContains(g_ram,coop,x,y,scripted?0:64,scripted?256:320,
       scripted?32:64,scripted?256:288,scripted?0:g_mmx_custom_view.extra);
 }
