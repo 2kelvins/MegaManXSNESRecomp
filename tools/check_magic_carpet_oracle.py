@@ -163,7 +163,9 @@ def main():
         c.ram[0xd1:0xd5] = bytes([2, 2, 0, 0])
         c.ram[0x1f7a] = 5
         c.ram[0x1f81:0x1f83] = bytes(2)
-        c.ram[0x1f99] = 1
+        # Native stage entry creates the boots actor. Granting ownership
+        # afterwards permits a dash but leaves its lower-body sprites absent.
+        c.ram[0x1f99] = 8
         c.ram[0x1f94] = 0xc0
         for _ in range(30):
             c.run(60)
@@ -173,6 +175,9 @@ def main():
             raise RuntimeError("did not enter Storm Eagle")
         c.run(60)
         c.ram[0x1f88:0x1fa0] = LOADOUT
+        boots_ready = bool(c.ram[0xc78] and c.ram[0xc8e] == 0x5f)
+        if not boots_ready:
+            raise RuntimeError("stage entry did not initialize the acquired dash boots")
         tick, heart_frames, carpet_frames = 0, 0, 0
         first_frame, first_y, min_y = None, 0, 65535
         heart_reference, same_reference = None, True
@@ -206,7 +211,9 @@ def main():
                             carpet_frames += 1
                             min_y = min(min_y, c.word(0xbb0))
                     writer.writerow([tick, f"{pad:03x}", c.word(0xbad), c.word(0xbb0), c.word(0x1e4d), c.word(0x1e50), f"{shot:04x}", f"{item:04x}", kind, f"{c.ram[0x1f9b]:02x}", c.ram[0xb9b], c.ram[0xb9c], c.ram[0x1f9a]])
-                    if tick in (900, 1500):
+                    if tick == 60 and not (c.ram[0xbaa] == 0x14 and c.ram[0xc78] and c.ram[0xc8f] == 0x38):
+                        raise RuntimeError("dash fixture did not submit the native boots pose")
+                    if tick in (60, 900, 1500):
                         c.screenshot(args.output / f"carpet-{tick}.bmp")
                     if tick in (760, 1500):
                         c.save(args.output / ("carpet-setup.state" if tick == 760 else "carpet-active.state"))
@@ -214,6 +221,7 @@ def main():
         summary = dict(frames=tick, heart_frames=heart_frames, carpet_frames=carpet_frames,
                        first_carpet_frame=first_frame, first_y=first_y, min_y=min_y,
                        same_reference=same_reference, max_health=c.ram[0x1f9a],
+                       dash_boots_initialized=boots_ready,
                        core_name=c.core_name, core_version=c.core_version,
                        core_sha256=hashlib.sha256(args.core.read_bytes()).hexdigest(), rom_sha256=ROM_SHA256)
         (args.output / "result.json").write_text(json.dumps(summary, indent=2) + "\n")

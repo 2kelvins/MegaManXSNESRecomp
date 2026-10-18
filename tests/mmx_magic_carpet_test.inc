@@ -16,7 +16,9 @@ static void magic_carpet_checks(const char *path,uint8 *start,uint8 *expected,ui
   check(g_ram[0xd1]==2 && g_ram[0xd2]==4,"carpet boots through title");
   g_ram[0xd1]=2;g_ram[0xd2]=2;g_ram[0xd3]=g_ram[0xd4]=0;
   g_ram[0x1f7a]=5;g_ram[0x1f81]=g_ram[0x1f82]=0;
-  g_ram[0x1f99]=1;g_ram[0x1f94]=0xc0;
+  /* $81:9D88..9DC7 creates armor actors at stage entry. Grant the boots
+   * now; changing ownership afterwards leaves their dash body absent. */
+  g_ram[0x1f99]=8;g_ram[0x1f94]=0xc0;
   for(unsigned i=0;i<30;++i) {
     carpet_frames(60,0);
     if(g_ram[0xd3]==4 && g_ram[0xba9]==2) break;
@@ -25,6 +27,7 @@ static void magic_carpet_checks(const char *path,uint8 *start,uint8 *expected,ui
   carpet_frames(60,0);
   static const uint8 loadout[]={0,0,0xdc,0,0,0,0,0,0,0,0,0,0xdc,0,0xdc,0,0xdc,8,16,4,0,0,0,0};
   memcpy(g_ram+0x1f88,loadout,sizeof(loadout));
+  check(g_ram[0xc78] && g_ram[0xc8e]==0x5f,"stage entry creates the acquired dash boots actor");
   printf("CARPET start wide=%u xy=%u,%u mode=%02x%02x%02x%02x\n",wide,carpet_word(0xbad),carpet_word(0xbb0),g_ram[0xd1],g_ram[0xd2],g_ram[0xd3],g_ram[0xd4]);
   FILE *inputs=fopen(path,"r");check(inputs!=NULL,"original carpet inputs open");
   FILE *trace=fopen("magic-carpet.csv","w");check(trace!=NULL,"carpet trace opens");
@@ -38,6 +41,20 @@ static void magic_carpet_checks(const char *path,uint8 *start,uint8 *expected,ui
     if(no_shot) pad&=~SNES_PAD_Y;
     while(count--) {
       frame(pad);unsigned shot=0,item=0,kind=0;
+      if(tick==60) {
+        check(g_ram[0xbaa]==0x14 && g_ram[0xc78] && g_ram[0xc8f]==0x38,"dash fixture submits the real boots pose");
+        unsigned x=carpet_word(0xbad)-carpet_word(0x1e4d)-6;
+        unsigned y=carpet_word(0xbb0)-carpet_word(0x1e50)+8;
+        /* A lower-leg highlight, where the broken fixture showed green
+         * runway. Check the rendered field as well as actor ownership. */
+        const uint32_t *native=(const uint32_t *)g_my_pixels;
+        check(x<256 && y<224 && (native[y*256+x]&0xffffff)==0x9c9c9c,"native dash shows X's lower leg");
+        if(wide) {
+          static uint32_t pixels[MMX_RENDER_MAX_WIDTH*224];
+          check(MmxRendererDraw(pixels,g_mmx_custom_view,false),"dash compositor renders");
+          check((pixels[y*g_mmx_custom_view.width+g_mmx_custom_view.extra+x]&0xffffff)==0x9c9c9c,"widescreen dash preserves X's lower leg");
+        }
+      }
       for(unsigned d=0x1228;d<0x1428;d+=64) {
         if(!g_ram[d] || g_ram[d+10]!=13) continue;
         unsigned held=carpet_word(d+12);
@@ -52,7 +69,7 @@ static void magic_carpet_checks(const char *path,uint8 *start,uint8 *expected,ui
       }
       fprintf(trace,"%u,%03x,%u,%u,%u,%u,%04x,%04x,%u,%02x\n",tick,pad,carpet_word(0xbad),carpet_word(0xbb0),carpet_word(0x1e4d),carpet_word(0x1e50),shot,item,kind,g_ram[0x1f9b]);
       if(tick%120==0) printf("CARPET %u xy=%u,%u shot=%04x item=%04x class=%u hearts=%02x\n",tick,carpet_word(0xbad),carpet_word(0xbb0),shot,item,kind,g_ram[0x1f9b]);
-      if(!no_shot && wide && (tick==900 || tick==1500)) {
+      if(!no_shot && wide && (tick==60 || tick==900 || tick==1500)) {
         char suffix[64];snprintf(suffix,sizeof(suffix),".carpet-%u.cap",tick);
         zero_capture(getenv("MMX_ZERO_TEST_CAPTURE"),suffix);
       }

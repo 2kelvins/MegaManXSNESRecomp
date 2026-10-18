@@ -61,7 +61,13 @@ The fixtures arrange a fresh Storm Eagle entrance and acquired equipment, then
 play 1,800 controller samples without writing the heart, boomerang or platforms.
 They check the original heart reference becoming a platform reference, maximum
 health increasing from 16 to 18, sustained flight and deterministic restore of
-an active carpet. Native, 16:9 and 32:9 are covered. A separate widescreen control
+an active carpet. The boots must be acquired **before** entering the stage:
+native initialization creates their separate sprite actor then. Granting only
+the ownership bit after entry allows dashing with the lower body missing, even
+in the original ROM under Snes9x. Both reproduction tools initialize the boots
+before entry; the ROM-backed checks also verify a visible lower-leg pixel in
+the native field and widescreen output during a dash. Native, 16:9 and 32:9 are
+covered. A separate widescreen control
 removes shooting from the same inputs and requires no carpet. Automated checks
 use a dummy audio device and disable background replay recording.
 
@@ -91,7 +97,7 @@ platform with these inputs.
 The tested oracle captures the platform at sample 992 and retains it through
 sample 1799. The native recompiler also captures it at 992, with the same player
 positions through 1194. Snes9x first repeats a gameplay frame at 1195 and repeats
-51 frames through this sequence. Replaying every raw movie sample in the
+66 frames through this sequence. Replaying every raw movie sample in the
 recompiler therefore changes subsequent jump timing; its carpet goes above the
 map and disappears at 1593. This is a successful grab and ride, not a claim of
 complete hardware movie timing or a validated full-stage speedrun route.
