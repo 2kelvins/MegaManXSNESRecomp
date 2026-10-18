@@ -62,6 +62,7 @@ static void magic_carpet_checks(const char *path,uint8 *start,uint8 *expected,ui
       }
       if(!no_shot && tick==1500) {
         check(kind==14,"playtest snapshot contains the active carpet");
+        check(g_mmx_custom_renderer && g_snes_width==g_mmx_custom_view.width && (wide || g_snes_width==256),"upper sky repair activates at the selected aspect");
         active_size=RtlSaveSnapshotToMemory(start,cap);
       }
       ++tick;

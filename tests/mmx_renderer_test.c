@@ -755,6 +755,53 @@ static void airport_panorama_edge(void) {
   assert(output[80 * v.width + v.extra + 560] == 0);
 }
 
+static void airport_upper_sky_repair(void) {
+  memset(&ppu,0,sizeof(ppu));memset(ram,0,sizeof(ram));memset(rom_bytes,0,sizeof(rom_bytes));
+  MmxRendererReset();MmxRendererSetRom(NULL,0);MmxRendererSetRom(rom_bytes,sizeof(rom_bytes));
+  ram[0xd1]=2;ram[0xd2]=ram[0xd3]=4;ram[0x1f7a]=5;ram[0x1e89]=6;
+  put_word(0x1e4d,777);put_word(0x1e50,194);
+  put_word(0x1e8d,1844);put_word(0x1e90,(unsigned)-1081);
+  put_word(0xb95,0x8000);ram[0xb97]=0x80;
+  put_word(0xb98,0x8000);ram[0xb9a]=0x80;ram[0xec03]=3;
+  for(unsigned i=0;i<256;++i)put_word(0xac00+i*2,1);
+  for(unsigned q=0;q<4;++q){rom_word(8+q*2,1);rom_word(16+q*2,3);}
+  /* Keep an authored foreground ledge over the cloud plane. */
+  put_word(0x21c4,2);
+  ppu.inidisp=15;ppu.bgmode=1;ppu.screenEnabled[0]=3;
+  ppu.bgXsc[0]=0x41;ppu.bgXsc[1]=0x49;
+  ppu.hScroll[0]=775;ppu.vScroll[0]=198;
+  ppu.hScroll[1]=817;ppu.vScroll[1]=968;
+  ppu.cgram[1]=31<<10;ppu.cgram[2]=31<<5;ppu.cgram[3]=31;
+  for(unsigned i=0x4000;i<0x5000;++i)ppu.vram[i]=2; /* Stale red runway. */
+  for(unsigned y=0;y<8;++y){ppu.vram[16+y]=255;ppu.vram[32+y]=65535;ppu.vram[48+y]=0xff00;}
+  assert(MmxRendererNeedsStormSkyRepair(ram));
+  assert(!MmxRendererNeedsStormSkyRepair(NULL));
+  capture();
+  static uint8_t before[sizeof(ram)];memcpy(before,ram,sizeof(ram));
+  const MmxRenderView views[]={{256,0,4.0/3.0},{342,43,16.0/9.0},
+      {682,213,32.0/9.0},{1024,384,16.0/3.0}};
+  for(unsigned i=0;i<sizeof(views)/sizeof(views[0]);++i){
+    MmxRenderView v=views[i];
+    g_mmx_render_asset_repairs=false;
+    assert(MmxRendererDraw(output,v,false));
+    assert(output[80*v.width+v.extra+128]==0xff0000);
+    g_mmx_render_asset_repairs=true;
+    assert(MmxRendererDraw(output,v,false));
+    for(int x=0;x<v.width;++x)assert(output[80*v.width+x]==0x0000ff);
+    assert(output[32*v.width+v.extra+32]==0x00ff00);
+    assert(!memcmp(before,ram,sizeof(ram)));
+  }
+  for(unsigned condition=0;condition<4;++condition){
+    ram[0x1f7a]=condition==0?0:5;ram[0x1e89]=condition==1?14:6;
+    put_word(0x1e50,condition==2?0x400:194);
+    ram[0x1f10]=condition==3?6:0;ram[0xc3]=condition==3?128:0;
+    assert(!MmxRendererNeedsStormSkyRepair(ram));
+    capture();assert(MmxRendererDraw(output,views[0],false));
+    if(condition!=3)assert(output[80*256+128]==0xff0000);
+  }
+  MmxRendererSetRom(NULL,0);
+}
+
 static void wide_water_plane(void) {
   memset(&ppu, 0, sizeof(ppu)); memset(ram, 0, sizeof(ram)); memset(rom_bytes, 0, sizeof(rom_bytes));
   MmxRendererReset(); MmxRendererSetRom(NULL, 0); MmxRendererSetRom(rom_bytes, sizeof(rom_bytes));
@@ -1516,4 +1563,4 @@ static void rush_results_page(void) {
   assert((output[48*256+92]&0xffffff)==0x00ffff);
   MmxBossRushReset();
 }
-int main(void) { geometry(); raster_and_hud(); sprite_coordinates(); independent_oam_visibility(); expanded_capacity(); background_resources(); dialogue_and_password(); highway_arena_sky(); highway_airship_binding(); distant_doors(); storm_background_prefill(); resource_decode(); spark_effects(); airport_panorama_edge(); wide_water_plane(); buried_submarine(); background_continuations(); launch_background_palettes(); sting_background_palettes(); mammoth_background_palettes(); dialogue_backdrop(); fortress_actor_presentation(); sprite_priority_and_cutscene_binding(); weapons_menu_margins(); zero_blink_submission(); rush_private_pose_graphics(); rush_static_and_streamed_graphics(); rush_results_page(); return 0; }
+int main(void) { geometry(); raster_and_hud(); sprite_coordinates(); independent_oam_visibility(); expanded_capacity(); background_resources(); dialogue_and_password(); highway_arena_sky(); highway_airship_binding(); distant_doors(); storm_background_prefill(); resource_decode(); spark_effects(); airport_panorama_edge(); airport_upper_sky_repair(); wide_water_plane(); buried_submarine(); background_continuations(); launch_background_palettes(); sting_background_palettes(); mammoth_background_palettes(); dialogue_backdrop(); fortress_actor_presentation(); sprite_priority_and_cutscene_binding(); weapons_menu_margins(); zero_blink_submission(); rush_private_pose_graphics(); rush_static_and_streamed_graphics(); rush_results_page(); return 0; }

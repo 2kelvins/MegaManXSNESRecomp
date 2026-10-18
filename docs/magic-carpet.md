@@ -96,6 +96,27 @@ recompiler therefore changes subsequent jump timing; its carpet goes above the
 map and disappears at 1593. This is a successful grab and ride, not a claim of
 complete hardware movie timing or a validated full-stage speedrun route.
 
+## Upper sky rendering
+
+The original ROM also scrambles the scenery during the high climb: the
+independent Snes9x reproduction shows pieces of runway and mountains mixed
+with clouds. In the recorded sequence, the cloud scroller reaches source
+coordinates beyond its painted region, including negative Y, and the native
+circular tilemap retains unrelated airport tiles. This is authentic visual
+corruption, separate from the platform grab.
+
+The compositor cleans up Storm Eagle's cloud phase above camera Y `$0400`.
+It reconstructs the foreground from the retained stage map and repeats the
+authored 256 by 256 cloud screen on both axes. This also activates the
+compositor at native 4:3 width; it needs no widescreen setting. HUD, sprites,
+brightness and color effects retain their usual composition. The raw renderer
+oracle still exposes the original pixels with asset repairs disabled.
+
+The repair changes presentation only. The 4:3, 16:9 and 32:9 controller traces
+must remain identical to the validated grab and ride. Other stages, the
+airport panorama, lower camera positions and the pause menu keep their
+existing rendering paths.
+
 ## Interactive practice on Windows
 
 After the widescreen CTest passes, run:
@@ -108,5 +129,6 @@ After the widescreen CTest passes, run:
 `setup` starts on the rooftop before the throw. `active` starts on an already
 captured platform. The script copies the fixture into a new temporary directory
 because `--resume-state` consumes its input file. The fixture originals and
-the player's configuration are preserved. Interactive launches use normal
+the player's configuration are preserved. A private mod catalog enables fixed
+16:9 without changing the player's installed mod selections. Interactive launches use normal
 audio; the test's dummy audio setting is not carried into the game.

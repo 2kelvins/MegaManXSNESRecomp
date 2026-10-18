@@ -97,6 +97,7 @@ static MmxRenderDebugRect frame_debug_rects[MAX_DEBUG_RECTS];
 static unsigned frame_debug_rect_count;
 static uint8_t door_cache[512 * 512];
 static int airport_sky_width;
+static bool airport_upper_sky;
 typedef struct SubmarineBody {
   int left, top, bottom;
   unsigned shift;
@@ -127,6 +128,13 @@ MmxDisplayViewport MmxRendererDestination(MmxRenderView view, int width, int hei
   return SnesDisplayAspect_FitViewport(view.aspect, width, height);
 }
 static unsigned word(const uint8_t *p, unsigned a) { return p[a] | (p[a + 1] << 8); }
+static bool storm_upper_sky(const uint8_t *ram, int camera_y) {
+  return MmxWidePolicy_IsStageScene(ram) && ram[0x1f7a] == 5 &&
+      ram[0x1e89] == 6 && camera_y < 0x400;
+}
+bool MmxRendererNeedsStormSkyRepair(const uint8_t ram[0x20000]) {
+  return ram && storm_upper_sky(ram, (int)word(ram, 0x1e50));
+}
 static bool zero_weapons_menu(void) {
   return MmxZeroEnabled() && !frame_zero.active_x && frame.ram[0xd1] == 2 && frame.ram[0xd2] == 4 &&
       (((frame.ram[0x1f10] == 6 || frame.ram[0x1f10] == 8) && (frame.ram[0xc3] & 128)) ||
@@ -867,6 +875,13 @@ static unsigned tile_pixel(const uint16_t *vram, unsigned address, int x, int y,
 }
 static void prepare_stage_planes(void) {
   airport_sky_width = 0; submarine_count = 0;
+  /* Magic Carpet can raise the camera above the airport while BG2's cloud
+   * scroller continues through negative Y and past its authored X range.
+   * Retail's circular VRAM then mixes clouds with stale runway/mountain
+   * tiles, even in 4:3. Repair presentation from the retained scene maps;
+   * no guest camera, tilemap, collision or actor state is changed. */
+  airport_upper_sky = g_mmx_render_asset_repairs &&
+      storm_upper_sky(frame.ram, view_camera(frame.ram, 0x1e50));
   if (frame.ram[0x1f7a] == 5 && frame.ram[0x1e89] == 0x0e &&
       word(frame.ram, 0x1e90) == 0 && word(frame.ram, 0x1e50) >= 0x300) {
     /* The airport panorama ends partway through screen 2 (640 pixels in
@@ -991,7 +1006,7 @@ static uint16_t background(const Ppu *p, const Raster *r, unsigned layer, int x,
     tile = weapon_menu_tile(tx, ty, tile);
   }
   if (stage && size == 8 && layer < 2 && !slime_surface &&
-      (x < 0 || x >= 256 || view_dx || view_dy)) {
+      (x < 0 || x >= 256 || view_dx || view_dy || airport_upper_sky)) {
     int wx, wy;
     if (layer == 0) {
       wx = MmxDisplay_ExpandStageScroll((uint16_t)word(frame.ram, 0x1e4d), p->hScroll[0]) + view_dx + x;
@@ -1046,6 +1061,13 @@ static uint16_t background(const Ppu *p, const Raster *r, unsigned layer, int x,
        * Earlier columns are intentionally empty at this vertical scroll;
        * extend the arena's sky edge when a wide view reaches behind it. */
       if (frame.ram[0x1f7a] == 0 && stream_x >= 0xa00 && wx < 0xa00) wx = 0xa00;
+      if (airport_upper_sky) {
+        /* Source screen 3 is the seamless 256x256 cloud plane, repeated in
+         * screens 4..6. Wrap both axes there instead of indexing unrelated
+         * airport art or falling back to the stale circular PPU tilemap. */
+        wx = 0x300 + ((unsigned)wx & 255);
+        wy = (unsigned)wy & 255;
+      }
     }
     /* Reconstruct prepared map data independently of circular VRAM history.
      * Outside authored terrain, reflect only the background edge. */
@@ -1102,7 +1124,7 @@ static uint16_t background(const Ppu *p, const Raster *r, unsigned layer, int x,
        * The complete ship resources are resident; retain its live binding. */
       if (layer == 1 && frame.ram[0x1f7a] == 0 && frame.ram[0x1e89] == 0x0c)
         asset_x = -1;
-    }
+    } else if (airport_upper_sky) return 0;
   }
   int cx = px & (size - 1), cy = py & (size - 1);
   if (tile & 0x4000) cx = size - 1 - cx;
