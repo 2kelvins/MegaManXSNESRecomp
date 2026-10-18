@@ -40,7 +40,16 @@ capture one. Restoring only the switch timing was insufficient.
 Solo play now keeps the original platform switch coordinates and gives the
 Storm Eagle heart exclusively to the native spawn pass. Its wide collectible
 rescan is also suppressed. Widescreen rendering remains available; these actors
-enter at their original gameplay boundaries. Co-op keeps its existing platform
+enter at their original gameplay boundaries. The extended margins show private
+ROM art for the dormant platform group and uncollected Heart Tank, without
+allocating guest objects. Dormant platforms hold their original starting poses;
+their movement and collision begin with native initialization. Previews cover
+the allocation and initialization frames, then yield to submitted real art.
+When a live actor skips native sprite submission, its captured pose can still
+draw in the margin. They never draw over the
+native 256-pixel field, duplicate a carried tank, or restore a collected tank.
+This is a visual approximation of inactive objects; it does not extend their
+interaction boundaries. Co-op keeps its existing platform
 and pickup behavior. This work does not qualify the trick for co-op or netplay.
 
 ## Reproducing the checks
@@ -67,7 +76,12 @@ the ownership bit after entry allows dashing with the lower body missing, even
 in the original ROM under Snes9x. Both reproduction tools initialize the boots
 before entry; the ROM-backed checks also verify a visible lower-leg pixel in
 the native field and widescreen output during a dash. Native, 16:9 and 32:9 are
-covered. A separate widescreen control
+covered. The ROM-backed checks also require visible margin art before the heart
+is allocated and across its native spawn handoff. Renderer checks cover native
+pixel preservation, partial allocation, collection, carried and hidden actors,
+co-op/menu/stage guards, and capture restore at different widths. The previews
+derive entirely from captured RAM and ROM, with no extra simulation state.
+A separate widescreen control
 removes shooting from the same inputs and requires no carpet. Automated checks
 use a dummy audio device and disable background replay recording.
 

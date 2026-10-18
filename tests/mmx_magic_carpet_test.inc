@@ -41,6 +41,18 @@ static void magic_carpet_checks(const char *path,uint8 *start,uint8 *expected,ui
     if(no_shot) pad&=~SNES_PAD_Y;
     while(count--) {
       frame(pad);unsigned shot=0,item=0,kind=0;
+      if(wide && tick>=724 && tick<=739) {
+        /* Left margin exposes the heart before the native pass allocates it
+         * at sample 728. Keep the art through initialization and submission. */
+        static uint32_t preview[MMX_RENDER_MAX_WIDTH*224];
+        check(MmxRendererDraw(preview,g_mmx_custom_view,false),"Storm margin preview renders");
+        check(MmxRendererGetStats().margin_sprite_pixels>0,"Storm heart stays visible across the native spawn handoff");
+        if(tick==724) {
+          bool heart=false;
+          for(unsigned d=0x1628;d<0x1928;d+=48) heart|=g_ram[d] && g_ram[d+10]==11;
+          check(!heart,"visible Storm preview does not allocate the heart early");
+        }
+      }
       if(tick==60) {
         check(g_ram[0xbaa]==0x14 && g_ram[0xc78] && g_ram[0xc8f]==0x38,"dash fixture submits the real boots pose");
         unsigned x=carpet_word(0xbad)-carpet_word(0x1e4d)-6;
