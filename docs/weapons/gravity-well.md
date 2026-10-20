@@ -90,13 +90,14 @@ captures were visually reviewed.
 
 ## Boss Rush entrances
 
-Boss Rush ownership excludes an actor from Gravity Well from the moment its
-slot is allocated. Native bosses temporarily use state 2 and an ordinary
+Boss Rush body identity excludes the boss from Gravity Well from the moment
+its slot is allocated. Native bosses temporarily use state 2 and an ordinary
 damage category while their entrance and health fill run; those transient
 bytes alone cannot establish that an actor is an ordinary enemy. The same
-ownership check rejects retained victims and their renderer/AI override, so
+body check rejects retained victims and their renderer/AI override, so
 an older snapshot containing an illegal boss capture releases it without
 moving it or entering the ordinary-enemy dissolve path.
+Ordinary minions remain eligible when their ownership tag refers to that boss.
 
 The ROM-backed regression runs with `MMX_BOSS_RUSH_TEST=1`,
 `MMX_BOSS_RUSH_GRAVITY_TEST=1` and `MMX_WEAPONS_TEST_ASSETS` pointing to a

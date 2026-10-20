@@ -2,6 +2,10 @@
  * deliberately not damage. See docs/weapons/gravity-well.md.
  * Shot variants 0 well/orb, 1 body; effect variants 2 enemy, 3 particles.
  * Victim origin_x/y retain native slot/type, vx retains anchored X. */
+static bool gravity_rush_boss(unsigned object) {
+  int seat=MmxBossRushOwner(object);
+  return seat>=0 && MmxBossRushGetState().bosses[seat].object==object;
+}
 const MmxWeaponShot *MmxWeaponsMovedEnemy(const MmxWeaponCombatState *c,unsigned enemy) {
   for(unsigned i=0;i<8;++i) {
     const MmxWeaponShot *s=c->shots+i;
@@ -10,7 +14,7 @@ const MmxWeaponShot *MmxWeaponsMovedEnemy(const MmxWeaponCombatState *c,unsigned
   for(unsigned i=0;i<16;++i) {
     const MmxWeaponShot *s=c->effects+i;
     if(s->active && s->page==2 && s->weapon==6 && s->variant==2 &&
-        s->origin_x==(int)enemy && MmxBossRushOwner(enemy)<0) return s;
+        s->origin_x==(int)enemy && !gravity_rush_boss(enemy)) return s;
   }
   return NULL;
 }
@@ -49,7 +53,7 @@ static int gravity_slow_vector(unsigned angle) {
 static bool gravity_host(const uint8_t *r,const MmxWeaponShot *s) {
   unsigned d=(unsigned)s->origin_x;
   return d>=0xe68 && d<0x1228 && (d&63)==0x28 && r[d] && r[d+1]==2 &&
-      r[d+10]==s->origin_y && (r[d+0x27]&127) && MmxBossRushOwner(d)<0;
+      r[d+10]==s->origin_y && (r[d+0x27]&127) && !gravity_rush_boss(d);
 }
 static void gravity_destroy(uint8_t *r,MmxWeaponShot *s) {
   unsigned d=(unsigned)s->origin_x;
@@ -91,8 +95,9 @@ static void gravity_capture(uint8_t *r,MmxWeaponShot *well) {
   for(unsigned d=0xe68;d<0x1228;d+=64) {
     /* Boss entrances temporarily use state 2 and an ordinary damage class.
      * Rush ownership is established at allocation, before those transient
-     * bytes can make a boss (or its children) look like a utility victim. */
-    if(MmxBossRushOwner(d)>=0) continue;
+     * bytes can make a boss look like a utility victim. Ordinary minions
+     * remain eligible even when they share the boss's ownership tag. */
+    if(gravity_rush_boss(d)) continue;
     if(!r[d] || r[d+1]!=2 || !(r[d+0x27]&127) || r[d+0x28]>=6 ||
         !word(r+d+0x20) || !MmxWeaponsEnemyActive(r,d,1)) continue;
     int x=(int)word(r+d+5)-(int)camera_x(r),y=(int)word(r+d+8)-(int)camera_y(r);
