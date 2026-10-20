@@ -58,6 +58,7 @@ static void zero_capture(const char *base, const char *suffix) {
 #include "mmx_zero_modern_test.inc"
 #include "mmx_graphics_pacing_test.inc"
 #include "mmx_hitbox_overlay_test.inc"
+#include "mmx_zero_saber_perf_test.inc"
 #include "mmx_saber_lock_test.inc"
 #include "mmx_coop_replay_test.inc"
 #include "mmx_diagnostic_replay_test.inc"
@@ -1954,6 +1955,11 @@ int main(int argc, char **argv) {
   uint8 *start = malloc(cap), *expected = malloc(cap), *actual = malloc(cap);
   if(getenv("MMX_MAGIC_CARPET_TEST")) {magic_carpet_checks(getenv("MMX_MAGIC_CARPET_TEST"),start,expected,actual,cap);return 0;}
   if(getenv("MMX_BOSS_RUSH_TEST")) {rush_runtime_checks(start,expected,actual,cap);return 0;}
+  if(getenv("MMX_ZERO_SABER_PERF_TEST")) {
+    check(MmxZeroLoad(getenv("MMX_ZERO_TEST_ASSETS")),"performance test loads original X3 Zero");
+    MmxZeroRegisterHooks();hitbox_boot();zero_replay(60);
+    saber_perf_checks("campaign",start,expected,actual,cap);return 0;
+  }
   const char *zero_assets = getenv("MMX_ZERO_TEST_ASSETS");
   const char *zero_title = getenv("MMX_ZERO_TITLE_FIXTURE");
   if(getenv("MMX_COOP_LIFT_REPLAY_FIXTURE")) {
