@@ -62,6 +62,9 @@ and drawing costs, and requires byte-identical resulting snapshots. Cases
 cover idle, repeated swings, positioned real boss hits, and the full native
 charge/two-buster/saber input chain. Readiness is bypassed only for the isolated
 swing probes; the full-chain probe instead protects the player while charging.
+For the same comparison in local co-op, add `MMX_PERF_COOP=1` for campaign, or
+set `MMX_BOSS_RUSH_COOP` to the Zero cache and `MMX_BOSS_RUSH_COOP_P1_ZERO=1`
+for Boss Rush. Port 1 attacks as Zero; port 2 remains X.
 
 ## Change the framework dependency
 

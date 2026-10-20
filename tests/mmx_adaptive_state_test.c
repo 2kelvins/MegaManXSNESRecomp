@@ -1957,7 +1957,11 @@ int main(int argc, char **argv) {
   if(getenv("MMX_BOSS_RUSH_TEST")) {rush_runtime_checks(start,expected,actual,cap);return 0;}
   if(getenv("MMX_ZERO_SABER_PERF_TEST")) {
     check(MmxZeroLoad(getenv("MMX_ZERO_TEST_ASSETS")),"performance test loads original X3 Zero");
-    MmxZeroRegisterHooks();hitbox_boot();zero_replay(60);
+    MmxZeroRegisterHooks();
+    if(getenv("MMX_PERF_COOP")) {
+      check(MmxCoopEnable(MMX_COOP_ZERO),"performance test enables native Zero/X co-op");MmxCoopRegisterHooks();
+    }
+    hitbox_boot();zero_replay(60);
     saber_perf_checks("campaign",start,expected,actual,cap);return 0;
   }
   const char *zero_assets = getenv("MMX_ZERO_TEST_ASSETS");
