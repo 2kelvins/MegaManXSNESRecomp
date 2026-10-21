@@ -29,7 +29,7 @@ jobs:
       - name: Download official Switch example
         run: |
           git clone --depth 1 \
-            https://github.com/devkitPro/switch-examples.git \
+            https://github.com/switchbrew/switch-examples.git \
             /tmp/switch-examples
 
           test -f /tmp/switch-examples/templates/application/Makefile
