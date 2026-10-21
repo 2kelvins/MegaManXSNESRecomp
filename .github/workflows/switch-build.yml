@@ -10,28 +10,35 @@ jobs:
   switch-test:
     name: Build minimal Switch homebrew
     runs-on: ubuntu-latest
+
     container:
       image: devkitpro/devkita64:latest
+
     env:
+      DEVKITPRO: /opt/devkitpro
       DEVKITA64: /opt/devkitpro/devkitA64
 
     steps:
       - name: Check Switch toolchain
         run: |
           echo "Checking devkitPro..."
-          echo "DEVKITPRO=$DEVKITPRO"
-          echo "DEVKITA64=$DEVKITA64"
-          ls -l "$DEVKITA64/bin/aarch64-none-elf-gcc"
-          ls -l "$DEVKITPRO/libnx/switch.specs"
-          find "$DEVKITPRO/libnx" -name switch.h
+          test -x "$DEVKITA64/bin/aarch64-none-elf-gcc"
+          test -f "$DEVKITPRO/libnx/switch.specs"
           echo "Toolchain found!"
 
-      - name: Create minimal homebrew
+      - name: Download official Switch example
         run: |
-          mkdir -p /tmp/switch-test
-          cd /tmp/switch-test
+          git clone --depth 1 \
+            https://github.com/devkitPro/switch-examples.git \
+            /tmp/switch-examples
 
-          cat > main.c <<'EOF'
+          test -f /tmp/switch-examples/templates/application/Makefile
+
+      - name: Create and build Switch homebrew
+        run: |
+          cd /tmp/switch-examples/templates/application
+
+          cat > source/main.c <<'EOF'
           #include <switch.h>
           #include <stdio.h>
 
@@ -52,33 +59,21 @@ jobs:
           }
           EOF
 
-          echo "Compiling ARM64..."
+          echo "Building with devkitPro Makefile..."
+          make -j2
 
-          "$DEVKITA64/bin/aarch64-none-elf-gcc" \
-            -march=armv8-a+crc+crypto \
-            -mtune=cortex-a57 \
-            -O2 \
-            -Wall \
-            -fPIE \
-            -D__SWITCH__ \
-            -I"$DEVKITPRO/libnx/include" \
-            -specs="$DEVKITPRO/libnx/switch.specs" \
-            main.c \
-            -L"$DEVKITPRO/libnx/lib" \
-            -lnx \
-            -o switch-test.elf
+          mkdir -p /tmp/switch-test
 
-          echo "Generating NRO..."
+          find . -maxdepth 1 -name '*.nro' \
+            -exec cp {} /tmp/switch-test/switch-test.nro \;
 
-          "$DEVKITPRO/tools/bin/elf2nro" \
-            switch-test.elf switch-test.nro
+          test -s /tmp/switch-test/switch-test.nro
 
-          test -f switch-test.nro
-          ls -lh switch-test.nro
+          ls -lh /tmp/switch-test/switch-test.nro
 
-      - name: Upload Switch NRO
-        uses: actions/upload-artifact@v4
-        with:
-          name: switch-first-test
-          path: /tmp/switch-test/switch-test.nro
-          if-no-files-found: error
+            - name: Upload Switch NRO
+              uses: actions/upload-artifact@v4
+              with:
+                name: switch-first-test
+                path: /tmp/switch-test/switch-test.nro
+                if-no-files-found: error
