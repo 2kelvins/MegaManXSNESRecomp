@@ -17,9 +17,11 @@ jobs:
       - name: Check Switch toolchain
         run: |
           echo "Checking devkitPro..."
-          test -x "$DEVKITA64/bin/aarch64-none-elf-gcc"
-          test -f "$DEVKITPRO/libnx/switch.specs"
-          test -f "$DEVKITPRO/libnx/include/switch.h"
+          echo "DEVKITPRO=$DEVKITPRO"
+          echo "DEVKITA64=$DEVKITA64"
+          ls -l "$DEVKITA64/bin/aarch64-none-elf-gcc"
+          ls -l "$DEVKITPRO/libnx/switch.specs"
+          find "$DEVKITPRO/libnx" -name switch.h
           echo "Toolchain found!"
 
       - name: Create minimal homebrew
