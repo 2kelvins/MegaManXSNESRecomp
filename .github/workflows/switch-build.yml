@@ -10,18 +10,22 @@ jobs:
   switch-test:
     name: Build minimal Switch homebrew
     runs-on: ubuntu-latest
+
     container:
       image: devkitpro/devkita64:latest
+
     env:
       DEVKITA64: /opt/devkitpro/devkitA64
+
     steps:
       - name: Check Switch toolchain
         run: |
           echo "DEVKITPRO=$DEVKITPRO"
           echo "DEVKITA64=$DEVKITA64"
-          test -n "$DEVKITPRO"
-          test -n "$DEVKITA64"
+          test -d "$DEVKITPRO/libnx"
           test -f "$DEVKITPRO/libnx/switch_rules"
+          test -x "$DEVKITA64/bin/aarch64-none-elf-gcc"
+          echo "Switch toolchain found!"
 
       - name: Create minimal homebrew
         run: |
@@ -31,23 +35,16 @@ jobs:
           #include <switch.h>
           #include <stdio.h>
 
-          int main(int argc, char **argv) {
+          int main(int argc, char **argv)
+          {
               consoleInit(NULL);
 
-              printf("Mega Man X - Switch build test\n");
-              printf("Hello from libnx!\n");
+              printf("Mega Man X - Switch Test\n");
+              printf("Hello from Nintendo Switch!\n");
+              printf("First homebrew build test.\n");
 
-              consoleUpdate(NULL);
-
-              while (appletMainLoop()) {
-                  hidScanInput();
-
-                  u64 keys = hidKeysDown(CONTROLLER_P1_AUTO);
-
-                  if (keys & KEY_PLUS) {
-                      break;
-                  }
-
+              while (appletMainLoop())
+              {
                   consoleUpdate(NULL);
               }
 
@@ -66,16 +63,21 @@ jobs:
           INCLUDES :=
 
           ARCH := -march=armv8-a+crc+crypto -mtune=cortex-a57
+
           CFLAGS := -g -Wall -O2 -ffunction-sections $(ARCH)
           CFLAGS += $(INCLUDE) -D__SWITCH__
+
           CXXFLAGS := $(CFLAGS) -fno-rtti -fno-exceptions
           ASFLAGS := -g $(ARCH)
-          LDFLAGS := -specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
+
+          LDFLAGS := -specs=$(DEVKITPRO)/libnx/switch.specs
+          LDFLAGS += -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
           LIBS := -lnx
           LIBDIRS := $(PORTLIBS) $(LIBNX)
 
           ifneq ($(BUILD),$(notdir $(CURDIR)))
+
           export OUTPUT := $(CURDIR)/$(TARGET)
           export TOPDIR := $(CURDIR)
           export VPATH := $(foreach dir,$(SOURCES),$(CURDIR)/$(dir))
@@ -83,12 +85,15 @@ jobs:
 
           CFILES := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
           OFILES := $(CFILES:.c=.o)
+
           export OFILES := $(OFILES)
+
           export INCLUDE := $(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
                             $(foreach dir,$(LIBDIRS),-I$(dir)/include)
+
           export LIBPATHS := $(foreach dir,$(LIBDIRS),-L$(dir)/lib)
 
-          .PHONY: $(BUILD) clean all
+          .PHONY: all clean $(BUILD)
 
           all: $(BUILD)
 
@@ -100,19 +105,25 @@ jobs:
           	@rm -rf $(BUILD) $(TARGET).elf $(TARGET).nro
 
           else
+
           DEPENDS := $(OFILES:.o=.d)
 
           $(OUTPUT).nro: $(OUTPUT).elf
           $(OUTPUT).elf: $(OFILES)
 
           -include $(DEPENDS)
+
           endif
           EOF
 
           cd /tmp/switch-test
           make -j2
 
-      - name: Upload NRO test artifact
+          echo "Checking generated NRO..."
+          test -f switch-test.nro
+          ls -lh switch-test.nro
+
+      - name: Upload Switch NRO
         uses: actions/upload-artifact@v4
         with:
           name: switch-first-test
