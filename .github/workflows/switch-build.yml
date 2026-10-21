@@ -45,8 +45,8 @@ jobs:
           {
               consoleInit(NULL);
 
-              printf("Mega Man X - Switch Test\n");
-              printf("Hello from Nintendo Switch!\n");
+              printf("Switch Test\n");
+              printf("Breno é nome de gay!\n");
 
               while (appletMainLoop())
               {
