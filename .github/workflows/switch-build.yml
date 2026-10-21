@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: devkitpro/devkita64:latest
+    env:
+      DEVKITA64: /opt/devkitpro/devkitA64
 
     steps:
       - name: Check Switch toolchain
