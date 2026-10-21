@@ -10,28 +10,24 @@ jobs:
   switch-test:
     name: Build minimal Switch homebrew
     runs-on: ubuntu-latest
-
     container:
       image: devkitpro/devkita64:latest
-
-    env:
-      DEVKITA64: /opt/devkitpro/devkitA64
 
     steps:
       - name: Check Switch toolchain
         run: |
-          echo "DEVKITPRO=$DEVKITPRO"
-          echo "DEVKITA64=$DEVKITA64"
-          test -d "$DEVKITPRO/libnx"
-          test -f "$DEVKITPRO/libnx/switch_rules"
+          echo "Checking devkitPro..."
           test -x "$DEVKITA64/bin/aarch64-none-elf-gcc"
-          echo "Switch toolchain found!"
+          test -f "$DEVKITPRO/libnx/switch.specs"
+          test -f "$DEVKITPRO/libnx/include/switch.h"
+          echo "Toolchain found!"
 
       - name: Create minimal homebrew
         run: |
           mkdir -p /tmp/switch-test
+          cd /tmp/switch-test
 
-          cat > /tmp/switch-test/main.c <<'EOF'
+          cat > main.c <<'EOF'
           #include <switch.h>
           #include <stdio.h>
 
@@ -41,7 +37,6 @@ jobs:
 
               printf("Mega Man X - Switch Test\n");
               printf("Hello from Nintendo Switch!\n");
-              printf("First homebrew build test.\n");
 
               while (appletMainLoop())
               {
@@ -53,78 +48,27 @@ jobs:
           }
           EOF
 
-          cat > /tmp/switch-test/Makefile <<'EOF'
-          include $(DEVKITPRO)/libnx/switch_rules
+          echo "Compiling ARM64..."
 
-          TARGET := switch-test
-          BUILD := build
-          SOURCES := .
-          DATA :=
-          INCLUDES :=
+          "$DEVKITA64/bin/aarch64-none-elf-gcc" \
+            -march=armv8-a+crc+crypto \
+            -mtune=cortex-a57 \
+            -O2 \
+            -Wall \
+            -fPIE \
+            -D__SWITCH__ \
+            -I"$DEVKITPRO/libnx/include" \
+            -specs="$DEVKITPRO/libnx/switch.specs" \
+            main.c \
+            -L"$DEVKITPRO/libnx/lib" \
+            -lnx \
+            -o switch-test.elf
 
-          ARCH := -march=armv8-a+crc+crypto -mtune=cortex-a57
+          echo "Generating NRO..."
 
-          CFLAGS := -g -Wall -O2 -ffunction-sections -fpie $(ARCH)
-          CFLAGS += $(INCLUDE) -D__SWITCH__
+          "$DEVKITPRO/tools/bin/elf2nro" \
+            switch-test.elf switch-test.nro
 
-          CXXFLAGS := $(CFLAGS) -fno-rtti -fno-exceptions
-          ASFLAGS := -g $(ARCH)
-
-          LDFLAGS := -specs=$(DEVKITPRO)/libnx/switch.specs
-          LDFLAGS += -g $(ARCH) -Wl,-Map,$(notdir $*.map)
-
-          LIBS := -lnx
-          LIBDIRS := $(PORTLIBS) $(LIBNX)
-         
-          export CC := $(DEVKITA64)/bin/aarch64-none-elf-gcc
-          export CXX := $(DEVKITA64)/bin/aarch64-none-elf-g++
-          export LD := $(DEVKITA64)/bin/aarch64-none-elf-g++
-          export AR := $(DEVKITA64)/bin/aarch64-none-elf-ar
-
-          ifneq ($(BUILD),$(notdir $(CURDIR)))
-
-          export OUTPUT := $(CURDIR)/$(TARGET)
-          export TOPDIR := $(CURDIR)
-          export VPATH := $(foreach dir,$(SOURCES),$(CURDIR)/$(dir))
-          export DEPSDIR := $(CURDIR)/$(BUILD)
-
-          CFILES := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
-          OFILES := $(CFILES:.c=.o)
-
-          export OFILES := $(OFILES)
-
-          export INCLUDE := $(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
-                            $(foreach dir,$(LIBDIRS),-I$(dir)/include)
-
-          export LIBPATHS := $(foreach dir,$(LIBDIRS),-L$(dir)/lib)
-
-          .PHONY: all clean $(BUILD)
-
-          all: $(BUILD)
-
-          $(BUILD):
-          	@mkdir -p $@
-          	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
-
-          clean:
-          	@rm -rf $(BUILD) $(TARGET).elf $(TARGET).nro
-
-          else
-
-          DEPENDS := $(OFILES:.o=.d)
-
-          $(OUTPUT).nro: $(OUTPUT).elf
-          $(OUTPUT).elf: $(OFILES)
-
-          -include $(DEPENDS)
-
-          endif
-          EOF
-
-          cd /tmp/switch-test
-          make -j2
-
-          echo "Checking generated NRO..."
           test -f switch-test.nro
           ls -lh switch-test.nro
 
