@@ -465,6 +465,9 @@ unsigned MmxZeroUpgradeBits(unsigned pc, unsigned original) {
   if (!MmxZeroActive()) return original;
   switch (pc & 0x7fffff) {
     case 0x01971c: case 0x019793: case 0x0198fc: return original | 8;
+    /* Let the native ceiling probe pass helmet blocks, then let the player
+     * update destroy them. Keep the shared inventory (and X) unchanged. */
+    case 0x019ea5: case 0x0499a4: return original | 1;
     default: return original;
   }
 }

@@ -117,6 +117,9 @@ Select **Modern** under **Zero behavior** in either Zero mod for saber combat
 and extra aerial movement. **X3 Behavior** is the default. **Add Zero** and
 **X / Zero Co-op** are alternatives; enabling one disables the other.
 
+All Zero styles can break blocks with their head and feet from the start,
+including in co-op. X still needs his corresponding armor upgrades.
+
 For widescreen, enable **Widescreen** in Mods and choose your view aspect.
 **Display Aspect** in Settings controls pixel proportions. Netplay uses the
 original view or fixed 16:9, 21:9, or 32:9.

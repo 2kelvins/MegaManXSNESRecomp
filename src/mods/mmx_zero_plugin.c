@@ -66,7 +66,14 @@ static void hook(CpuState *cpu, uint32_t pc) {
     case 0x009dca: MmxZeroHealthRespawn(g_ram); break;
     case 0x00d6a7: MmxRendererObserveObject(g_ram, (uint16_t)(cpu->D + cpu->X)); break;
     case 0x00d76a: MmxRendererRecordPiece(g_ram, cpu->D); break;
-    case 0x01971f: case 0x019796: case 0x0198ff: if (MmxZeroActive()) cpu->A |= 8; break;
+    case 0x01971f: case 0x019796: case 0x0198ff:
+    case 0x019ea8: case 0x0499a7: {
+      unsigned value = MmxZeroUpgradeBits(pc - 3, cpu->A & 255);
+      cpu->A = (cpu->A & 0xff00) | value;
+      cpu->_flag_Z = !value; cpu->_flag_N = (value & 128) != 0;
+      cpu->P = (cpu->P & ~0x82) | (cpu->_flag_Z ? 2 : 0) | (cpu->_flag_N ? 128 : 0);
+      break;
+    }
     case 0x01815c:
       MmxZeroExtPrePlayer(g_ram);
       MmxZeroSlideTick(g_ram);
@@ -191,6 +198,7 @@ static bool zero_terrain_solid(const uint8_t *r, int x, int y) {
 void MmxZeroRegisterHooks(void) {
   MmxZeroSetTerrainQuery(zero_terrain_solid);
   const unsigned pcs[] = {0x009dca, 0x00d6a7, 0x00d76a, 0x01971f, 0x019796, 0x0198ff,
+                          0x019ea8, 0x0499a7,
                           0x01815c, 0x018165, 0x019d47, 0x0194af, 0x00d3e7, 0x00d4f4, 0x00d511, 0x049e1d, 0x049e3a, 0x049e45, 0x049e76, 0x049c19, 0x048f07, 0x048eea, 0x018b04, 0x0491dc, 0x02823e,
                           0x01898e, 0x018999, 0x018965,
                           0x028403,0x03958f,0x039dcf,

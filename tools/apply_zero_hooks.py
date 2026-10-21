@@ -5,7 +5,9 @@ from pathlib import Path
 import re
 
 MARKER = '/*MMX-ZERO*/'
-PCS = {0x81971c, 0x819793, 0x8198fc}
+PCS = {0x81971c, 0x819793, 0x8198fc, 0x819ea1, 0x8499a4}
+# The head-crush block clears a body flag before loading the upgrade byte.
+UPGRADE_LOAD_PCS = {0x819ea1: 0x819ea5}
 MUZZLE_PCS = {0x81a566, 0x81a578, 0x838b6a, 0x838d82, 0x838eb4,
               0x839518, 0x83983c, 0x839974, 0x83a3a9}
 ORIGIN_PCS = {0x8283ed: 1, 0x83958c: 0, 0x839dc5: 1}
@@ -114,7 +116,8 @@ def apply(text):
         if pc in PCS:
             load = re.search(r'uint8 (_v\d+) = cpu_read8\(cpu, cpu->DB, \(uint16\)\(0x1f99\)\);', line)
             if load:
-                output.append(f'    {MARKER} {{ extern unsigned MmxZeroUpgradeBits(unsigned, unsigned); {load[1]} = (uint8)MmxZeroUpgradeBits(0x{pc:06x}, {load[1]}); }}\n')
+                source = UPGRADE_LOAD_PCS.get(pc, pc)
+                output.append(f'    {MARKER} {{ extern unsigned MmxZeroUpgradeBits(unsigned, unsigned); {load[1]} = (uint8)MmxZeroUpgradeBits(0x{source:06x}, {load[1]}); }}\n')
                 found.add(pc)
     return ''.join(output), found
 
