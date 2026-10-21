@@ -99,6 +99,7 @@ void MmxZeroSetTerrainQuery(bool (*solid)(const uint8_t *ram, int x, int y));
 bool MmxZeroSlideHold(uint8_t ram[0x20000], unsigned pc);
 /* Before the player state dispatch: re-enter the dash if Zero cannot stand. */
 void MmxZeroSlideTick(uint8_t ram[0x20000]);
+/* Character abilities at native instruction PCs, without changing inventory. */
 unsigned MmxZeroUpgradeBits(unsigned pc, unsigned original);
 void MmxZeroPlayerTick(uint8_t ram[0x20000]);
 void MmxZeroPlayerEnd(uint8_t ram[0x20000]);

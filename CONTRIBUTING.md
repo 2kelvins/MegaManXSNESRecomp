@@ -66,6 +66,15 @@ For the same comparison in local co-op, add `MMX_PERF_COOP=1` for campaign, or
 set `MMX_BOSS_RUSH_COOP` to the Zero cache and `MMX_BOSS_RUSH_COOP_P1_ZERO=1`
 for Boss Rush. Port 1 attacks as Zero; port 2 remains X.
 
+For native block-crushing checks, run `mmx_state_tests` from an empty working
+directory with the X1 ROM, `MMX_ZERO_BLOCKS_TEST=1`, `MMX_ZERO_TEST_ASSETS`
+pointing to the extracted X3 Zero cache, `MMX_REPLAY_RECORD=0`, and
+`SDL_AUDIODRIVER=dummy`. The test arranges contact with a real Flame Mammoth
+block and calls the native head/foot destruction routines through compiled
+and interpreted execution; it checks Zero's innate abilities, X's upgrade
+gates, and unchanged inventory in both behavior
+modes. It does not validate the full route to the capsule.
+
 ## Change the framework dependency
 
 The `snesrecomp` gitlink is the single source of truth for the framework
