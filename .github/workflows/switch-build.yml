@@ -71,9 +71,9 @@ jobs:
 
           ls -lh /tmp/switch-test/switch-test.nro
 
-            - name: Upload Switch NRO
-              uses: actions/upload-artifact@v4
-              with:
-                name: switch-first-test
-                path: /tmp/switch-test/switch-test.nro
-                if-no-files-found: error
+        - name: Upload Switch NRO
+          uses: actions/upload-artifact@v4
+          with:
+            name: switch-first-test
+            path: /tmp/switch-test/switch-test.nro
+            if-no-files-found: error
