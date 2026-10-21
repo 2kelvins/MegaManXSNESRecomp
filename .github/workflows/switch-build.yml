@@ -74,7 +74,7 @@ jobs:
           LDFLAGS += -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
           LIBS := -lnx
-          LIBDIRS := $(PORTLIBS) $(         
+          LIBDIRS := $(PORTLIBS) $(LIBNX)
          
           export CC := $(DEVKITA64)/bin/aarch64-none-elf-gcc
           export CXX := $(DEVKITA64)/bin/aarch64-none-elf-g++
