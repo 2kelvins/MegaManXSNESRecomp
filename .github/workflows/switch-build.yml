@@ -31,7 +31,6 @@ jobs:
           git clone --depth 1 \
             https://github.com/switchbrew/switch-examples.git \
             /tmp/switch-examples
-
           test -f /tmp/switch-examples/templates/application/Makefile
 
       - name: Create and build Switch homebrew
@@ -68,12 +67,11 @@ jobs:
             -exec cp {} /tmp/switch-test/switch-test.nro \;
 
           test -s /tmp/switch-test/switch-test.nro
-
           ls -lh /tmp/switch-test/switch-test.nro
 
-        - name: Upload Switch NRO
-          uses: actions/upload-artifact@v4
-          with:
-            name: switch-first-test
-            path: /tmp/switch-test/switch-test.nro
-            if-no-files-found: error
+      - name: Upload Switch NRO
+        uses: actions/upload-artifact@v4
+        with:
+          name: switch-first-test
+          path: /tmp/switch-test/switch-test.nro
+          if-no-files-found: error
