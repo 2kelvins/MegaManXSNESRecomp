@@ -91,6 +91,7 @@ jobs:
             -std=gnu11 \
             -D__ANDROID__ \
             -I src \
+            -I recomp \
             -I snesrecomp/runner/src \
             -I snesrecomp/runner/src/snes \
             -I snesrecomp/runner/src/desktop \
