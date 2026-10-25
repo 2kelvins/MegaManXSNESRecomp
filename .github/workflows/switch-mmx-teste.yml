@@ -100,7 +100,7 @@ jobs:
             -pthread
 
           echo "Mega Man X RTL compilation succeeded!"
-          
+
       - name: Check compiler
         run: |
           echo "Checking Nintendo Switch compiler"
@@ -128,3 +128,28 @@ jobs:
         run: |
           ls -lh build-switch/mmx_cpu_infra.o
           echo "Mega Man X ARM64 compilation succeeded!"
+
+      - name: Inspect Switch link requirements
+        run: |
+          echo "=== Existing build definitions ==="
+          find . -maxdepth 4 \( -name Makefile -o -name CMakeLists.txt \) -print | head -80
+
+          echo "=== Potential entry points ==="
+          grep -R -n -m 2 -E 'int main\\s*\\(' src snesrecomp/runner/src 2>/dev/null | head -50 || true
+
+          echo "=== Compiled ARM64 objects ==="
+          ls -lh build-switch/*.o
+
+          echo "=== Available NRO tools ==="
+          command -v elf2nro || true
+          ls /opt/devkitpro/tools/bin/elf2nro 2>/dev/null || true
+
+          echo "=== libnx ==="
+          ls /opt/devkitpro/libnx/lib/libnx.a 2>/dev/null || true
+
+      - name: Upload ARM64 compile artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mmx-arm64-objects-test-10
+          path: build-switch/*.o
+          if-no-files-found: error
