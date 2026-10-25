@@ -116,6 +116,7 @@ jobs:
       - name: Compile Mega Man X CPU infrastructure
         run: |
           mkdir -p build-switch
+
           $DEVKITA64/bin/aarch64-none-elf-gcc \
             -std=gnu11 \
             -I src \
@@ -135,7 +136,7 @@ jobs:
           find . -maxdepth 4 \( -name Makefile -o -name CMakeLists.txt \) -print | head -80
 
           echo "=== Potential entry points ==="
-          grep -R -n -m 2 -E 'int main\\s*\\(' src snesrecomp/runner/src 2>/dev/null | head -50 || true
+          grep -R -n -m 2 -E 'int main[[:space:]]*\(' src snesrecomp/runner/src 2>/dev/null | head -50 || true
 
           echo "=== Compiled ARM64 objects ==="
           ls -lh build-switch/*.o
