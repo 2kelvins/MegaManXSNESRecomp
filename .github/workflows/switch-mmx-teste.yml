@@ -31,11 +31,38 @@ jobs:
 
       - name: Check pthread support
         run: |
-          echo '#include <pthread.h>' > /tmp/test_pthread.c
-          echo 'int main(void) { return 0; }' >> /tmp/test_pthread.c
+          cat > /tmp/test_pthread.c <<'EOF'
+          #include <pthread.h>
+
+          static void *worker(void *arg) {
+              return arg;
+          }
+
+          int main(void) {
+              pthread_t thread;
+              pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+              pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+              pthread_mutex_lock(&mutex);
+              pthread_cond_signal(&cond);
+              pthread_mutex_unlock(&mutex);
+
+              if (pthread_create(&thread, NULL, worker, NULL) != 0)
+                  return 1;
+
+              pthread_join(thread, NULL);
+              pthread_cond_destroy(&cond);
+              pthread_mutex_destroy(&mutex);
+              return 0;
+          }
+          EOF
+
           $DEVKITA64/bin/aarch64-none-elf-gcc \
-            -c /tmp/test_pthread.c \
-            -o /tmp/test_pthread.o
+            /tmp/test_pthread.c \
+            -o /tmp/test_pthread.elf \
+            -pthread
+
+          echo "Pthread compilation and linking succeeded!"
             
       - name: Check compiler
         run: |
