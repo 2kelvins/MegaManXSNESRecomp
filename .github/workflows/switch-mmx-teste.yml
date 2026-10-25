@@ -63,7 +63,23 @@ jobs:
             -pthread
 
           echo "Pthread compilation and linking succeeded!"
-            
+
+      - name: Compile Mega Man X fiber compatibility
+        run: |
+          echo "Compiling fiber compatibility for Switch ARM64..."
+
+          mkdir -p build-switch
+
+          $DEVKITA64/bin/aarch64-none-elf-gcc \
+            -std=gnu11 \
+            -D__ANDROID__ \
+            -I snesrecomp/runner/src/desktop \
+            -I snesrecomp/runner/src \
+            -c snesrecomp/runner/src/desktop/fiber_compat.c \
+            -o build-switch/fiber_compat.o \
+            -pthread
+
+          echo "Fiber compatibility compilation succeeded!"
       - name: Check compiler
         run: |
           echo "Checking Nintendo Switch compiler"
