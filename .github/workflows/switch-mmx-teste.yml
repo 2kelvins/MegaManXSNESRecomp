@@ -80,6 +80,26 @@ jobs:
             -pthread
 
           echo "Fiber compatibility compilation succeeded!"
+
+      - name: Compile Mega Man X RTL for Switch
+        run: |
+          echo "Testing Mega Man X RTL compilation for Switch ARM64..."
+
+          mkdir -p build-switch
+
+          $DEVKITA64/bin/aarch64-none-elf-gcc \
+            -std=gnu11 \
+            -D__ANDROID__ \
+            -I src \
+            -I snesrecomp/runner/src \
+            -I snesrecomp/runner/src/snes \
+            -I snesrecomp/runner/src/desktop \
+            -c src/mmx_rtl.c \
+            -o build-switch/mmx_rtl.o \
+            -pthread
+
+          echo "Mega Man X RTL compilation succeeded!"
+          
       - name: Check compiler
         run: |
           echo "Checking Nintendo Switch compiler"
