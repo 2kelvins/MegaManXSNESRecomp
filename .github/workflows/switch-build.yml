@@ -19,6 +19,11 @@ jobs:
       DEVKITA64: /opt/devkitpro/devkitA64
 
     steps:
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          
       - name: Check Switch toolchain
         run: |
           echo "Checking devkitPro..."
