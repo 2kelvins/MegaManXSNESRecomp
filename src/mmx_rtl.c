@@ -916,7 +916,7 @@ void MmxDrawPpuFrame(void) {
        * handler's RTI has a frame to pop (paired with cpu_state.h's RTI
        * pop). Without it cpu->S drifts on every interrupt. */
       cpu_push_interrupt_frame(&g_cpu);
-      IRQHandler(&g_cpu);
+      IrqHandler(&g_cpu);
       trigger = g_snes->vIrqEnabled ? g_snes->vTimer + 1 : -1;
     }
   }
