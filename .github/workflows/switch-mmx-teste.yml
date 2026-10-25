@@ -1,0 +1,53 @@
+name: Switch - Mega Man X Compile Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mmx-compile:
+    name: Compile Mega Man X for ARM64
+    runs-on: ubuntu-latest
+
+    container:
+      image: devkitpro/devkita64:latest
+
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Check compiler
+        run: |
+          echo "Checking Nintendo Switch compiler"
+          $DEVKITA64/bin/aarch64-none-elf-gcc --version
+
+      - name: Check Mega Man X source files
+        run: |
+          test -f src/mmx_cpu_infra.c
+          test -f src/mmx_rtl.h
+          test -d snesrecomp/runner/src
+          echo "Source files found!"
+
+      - name: Compile Mega Man X CPU infrastructure
+        run: |
+          mkdir -p build-switch
+          $DEVKITA64/bin/aarch64-none-elf-gcc \
+            -std=gnu11 \
+            -I src \
+            -I snesrecomp/runner/src \
+            -I snesrecomp/runner/src/snes \
+            -c src/mmx_cpu_infra.c \
+            -o build-switch/mmx_cpu_infra.o
+
+      - name: Check compiled object
+        run: |
+          ls -lh build-switch/mmx_cpu_infra.o
+          echo "Mega Man X ARM64 compilation succeeded!"
