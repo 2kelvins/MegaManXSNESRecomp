@@ -24,6 +24,11 @@ jobs:
         with:
           submodules: recursive
 
+      - name: find fiber compatibility header
+        run: |
+          echo "searching for fiber_compat.h ..."
+          find . -type f -name "fiber_compat.h"
+          
       - name: Check compiler
         run: |
           echo "Checking Nintendo Switch compiler"
