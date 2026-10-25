@@ -28,7 +28,15 @@ jobs:
         run: |
           echo "searching for fiber_compat.h ..."
           find . -type f -name "fiber_compat.h"
-          
+
+      - name: Check pthread support
+        run: |
+          echo '#include <pthread.h>' > /tmp/test_pthread.c
+          echo 'int main(void) { return 0; }' >> /tmp/test_pthread.c
+          $DEVKITA64/bin/aarch64-none-elf-gcc \
+            -c /tmp/test_pthread.c \
+            -o /tmp/test_pthread.o
+            
       - name: Check compiler
         run: |
           echo "Checking Nintendo Switch compiler"
