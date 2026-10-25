@@ -916,7 +916,7 @@ void MmxDrawPpuFrame(void) {
        * handler's RTI has a frame to pop (paired with cpu_state.h's RTI
        * pop). Without it cpu->S drifts on every interrupt. */
       cpu_push_interrupt_frame(&g_cpu);
-      I_IRQ(&g_cpu);
+      IRQHandler(&g_cpu);
       trigger = g_snes->vIrqEnabled ? g_snes->vTimer + 1 : -1;
     }
   }
@@ -943,7 +943,7 @@ void RunOneFrameOfGame(void) {
   if (!g_did_reset) {
     cpu_state_init(&g_cpu, g_ram);
     cpu_trace_px_breadcrumb(&g_cpu, 0x1000, "after_cpu_state_init");
-    I_RESET(&g_cpu);
+    ResetHandler(&g_cpu);
     cpu_trace_px_breadcrumb(&g_cpu, 0x1001, "after_I_RESET");
     g_did_reset = true;
   }
@@ -1041,7 +1041,7 @@ void RunOneFrameOfGame(void) {
      * handler's RTI has a frame to pop (paired with cpu_state.h's RTI
      * pop). Without it cpu->S drifts on every interrupt. */
     cpu_push_interrupt_frame(&g_cpu);
-    I_NMI(&g_cpu);
+    NmiHandler(&g_cpu);
     cpu_trace_px_breadcrumb(&g_cpu, 0x2001, "after_I_NMI");
     if (mmx_rtl_diag_enabled() && s_diag_frames < 5) {
       fprintf(stderr, "  [post-NMI] slot0 state=$%02X cd=$%02X pc=$%02X%02X\n",
