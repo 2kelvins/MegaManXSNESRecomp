@@ -1,4 +1,3 @@
-
 #include <switch.h>
 #include <stdio.h>
 
@@ -8,12 +7,24 @@ int main(int argc, char **argv) {
 
     consoleInit(NULL);
 
-    printf("MEGA MAN X - SWITCH\n");
-    printf("===================\n\n");
-    printf("TESTE 13\n");
-    printf("Console inicializado!\n");
+    printf("Mega Man X - Nintendo Switch\n");
+    printf("============================\n\n");
+    printf("TESTE 11\n");
+    printf("Inicializacao concluida!\n\n");
+    printf("Pressione + para sair.\n");
+
+    padConfigureInput(1, HidNpadStyleSet_NpadStandard);
+
+    PadState pad;
+    padInitializeDefault(&pad);
 
     while (appletMainLoop()) {
+        padUpdate(&pad);
+
+        if (padGetButtonsDown(&pad) & HidNpadButton_Plus) {
+            break;
+        }
+
         consoleUpdate(NULL);
     }
 
