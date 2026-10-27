@@ -1,0 +1,67 @@
+name: Switch - Mega Man X Teste 11
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-nro:
+    name: Gerar NRO de diagnostico
+    runs-on: ubuntu-latest
+
+    container:
+      image: devkitpro/devkita64:latest
+
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+
+    steps:
+      - name: Baixar repositorio
+        uses: actions/checkout@v4
+
+      - name: Verificar ferramentas e codigo
+        run: |
+          set -eu
+          test -f src/switch_main.c
+          test -f "$DEVKITPRO/libnx/include/switch.h"
+          test -f "$DEVKITPRO/libnx/lib/libnx.a"
+          test -f "$DEVKITPRO/libnx/switch.specs"
+          test -f "$DEVKITPRO/libnx/switch.ld"
+          test -x "$DEVKITPRO/tools/bin/elf2nro"
+          echo "Ferramentas encontradas!"
+
+      - name: Compilar programa para Switch
+        run: |
+          set -eu
+          mkdir -p build-switch
+
+          "$DEVKITA64/bin/aarch64-none-elf-gcc" \
+            -std=gnu11 \
+            -O2 \
+            -Wall \
+            -I"$DEVKITPRO/libnx/include" \
+            -specs="$DEVKITPRO/libnx/switch.specs" \
+            -T"$DEVKITPRO/libnx/switch.ld" \
+            -o build-switch/mmx-test11.elf \
+            src/switch_main.c \
+            -L"$DEVKITPRO/libnx/lib" \
+            -lnx
+
+      - name: Converter ELF para NRO
+        run: |
+          set -eu
+          "$DEVKITPRO/tools/bin/elf2nro" \
+            build-switch/mmx-test11.elf \
+            build-switch/mmx-test11.nro
+
+          ls -lh build-switch/mmx-test11.nro
+
+      - name: Disponibilizar NRO
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste11
+          path: build-switch/mmx-test11.nro
+          if-no-files-found: error
