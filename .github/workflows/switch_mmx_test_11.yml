@@ -42,6 +42,8 @@ jobs:
             -std=gnu11 \
             -O2 \
             -Wall \
+            -fno-pie \
+            -no-pie \
             -I"$DEVKITPRO/libnx/include" \
             -specs="$DEVKITPRO/libnx/switch.specs" \
             -o build-switch/mmx-test11.elf \
