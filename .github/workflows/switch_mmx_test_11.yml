@@ -44,7 +44,6 @@ jobs:
             -Wall \
             -I"$DEVKITPRO/libnx/include" \
             -specs="$DEVKITPRO/libnx/switch.specs" \
-            -T"$DEVKITPRO/libnx/switch.ld" \
             -o build-switch/mmx-test11.elf \
             src/switch_main.c \
             -L"$DEVKITPRO/libnx/lib" \
