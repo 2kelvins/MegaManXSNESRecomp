@@ -1,0 +1,86 @@
+name: Switch - Mega Man X Teste 21
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose-link:
+    name: Diagnosticar vinculacao dos modulos MMX
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+    steps:
+      - name: Baixar repositorio e submodulos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Compilar objetos ARM64
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-switch/test21
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          INCLUDES=(-I src -I "$DEVKITPRO/libnx/include")
+          for dir in src/gen recomp variants/jp/config snesrecomp/runner/src snesrecomp/runner/src/desktop snesrecomp/runner/include; do
+            if test -d "$dir"; then INCLUDES+=("-I$dir"); fi
+          done
+          for module in mmx_cpu_infra mmx_rtl; do
+            "$CC" -std=gnu11 -O0 -Wall -fPIE "${INCLUDES[@]}" \
+              -c "src/$module.c" -o "build-switch/test21/$module.o" \
+              > "build-switch/test21/$module.compile.log" 2>&1
+            echo "$module: compilado"
+          done
+          "$CC" -std=gnu11 -O0 -Wall -fPIE \
+            -I "$DEVKITPRO/libnx/include" \
+            -c src/switch_main.c -o build-switch/test21/switch_main.o \
+            > build-switch/test21/switch_main.compile.log 2>&1
+
+      - name: Listar simbolos e tentar vinculacao
+        shell: bash
+        run: |
+          set -uo pipefail
+          OUT=build-switch/test21
+          NM="$DEVKITA64/bin/aarch64-none-elf-nm"
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          "$NM" -u "$OUT/mmx_cpu_infra.o" > "$OUT/mmx_cpu_infra.undefined.txt" 2>&1
+          "$NM" -u "$OUT/mmx_rtl.o" > "$OUT/mmx_rtl.undefined.txt" 2>&1
+          "$NM" -g --defined-only "$OUT/mmx_cpu_infra.o" "$OUT/mmx_rtl.o" > "$OUT/mmx.defined.txt" 2>&1
+          echo 'Tentando vincular os dois modulos ao programa de diagnostico...'
+          "$CC" -std=gnu11 -O0 -fPIE \
+            -specs="$DEVKITPRO/libnx/switch.specs" \
+            -o "$OUT/mmx-test21.elf" \
+            "$OUT/switch_main.o" "$OUT/mmx_cpu_infra.o" "$OUT/mmx_rtl.o" \
+            -L"$DEVKITPRO/libnx/lib" -lnx \
+            > "$OUT/link.log" 2>&1
+          status=$?
+          {
+            echo 'TESTE 21 - DIAGNOSTICO DE VINCULACAO'
+            echo 'Objetos: mmx_cpu_infra.o, mmx_rtl.o, switch_main.o'
+            if test "$status" -eq 0; then
+              echo 'RESULTADO: VINCULACAO OK'
+              echo 'ATENCAO: isto nao comprova que o motor do jogo executa.'
+            else
+              echo "RESULTADO: VINCULACAO INCOMPLETA (codigo $status)"
+              echo 'Veja link.log e os arquivos *.undefined.txt.'
+            fi
+          } | tee "$OUT/resumo.txt"
+          echo '--- Inicio do relatorio de vinculacao ---'
+          head -70 "$OUT/link.log"
+          echo '--- Fim do diagnostico ---'
+          # Falha de vinculacao e um resultado esperado deste diagnostico.
+          exit 0
+
+      - name: Disponibilizar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste21-Relatorios
+          path: build-switch/test21/
+          if-no-files-found: warn
