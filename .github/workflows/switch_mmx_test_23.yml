@@ -1,0 +1,129 @@
+name: Switch - Mega Man X Teste 23
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  map-dependencies:
+    name: Mapear origem das dependencias do motor MMX
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+    steps:
+      - name: Baixar repositorio e submodulos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Compilar os dois modulos reais
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=build-switch/test23
+          mkdir -p "$OUT"
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          INCLUDES=(-I src -I "$DEVKITPRO/libnx/include")
+          for dir in src/gen recomp variants/jp/config snesrecomp/runner/src snesrecomp/runner/src/desktop snesrecomp/runner/include; do
+            if test -d "$dir"; then INCLUDES+=("-I$dir"); fi
+          done
+          for module in mmx_cpu_infra mmx_rtl; do
+            "$CC" -std=gnu11 -O0 -Wall -fPIE "${INCLUDES[@]}" \
+              -c "src/$module.c" -o "$OUT/$module.o" \
+              > "$OUT/$module.compile.log" 2>&1
+          done
+          "$DEVKITA64/bin/aarch64-none-elf-nm" -u \
+            "$OUT/mmx_cpu_infra.o" "$OUT/mmx_rtl.o" > "$OUT/simbolos-indefinidos.txt"
+          "$DEVKITA64/bin/aarch64-none-elf-nm" -g --defined-only \
+            "$OUT/mmx_cpu_infra.o" "$OUT/mmx_rtl.o" > "$OUT/simbolos-definidos.txt"
+
+      - name: Localizar candidatos no codigo original
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-switch/test23
+          cat > build-switch/test23/mapear.py <<'PY'
+          import csv
+          import pathlib
+          import re
+          from collections import defaultdict
+
+          root = pathlib.Path(".")
+          out = pathlib.Path("build-switch/test23")
+          nm_text = (out / "simbolos-indefinidos.txt").read_text(errors="replace")
+          symbols = sorted(set(re.findall(r"^\s+U\s+(\S+)\s*$", nm_text, re.M)))
+          own = set(re.findall(r"^\S+\s+[A-Za-z]\s+(\S+)\s*$",
+                               (out / "simbolos-definidos.txt").read_text(errors="replace"), re.M))
+          symbols = [s for s in symbols if s not in own]
+          extensions = {".c", ".cc", ".cpp", ".cxx", ".s", ".S"}
+          excluded = {".git", "build-switch", "build", "node_modules"}
+          files = []
+          for path in root.rglob("*"):
+              if not path.is_file() or path.suffix not in extensions:
+                  continue
+              if any(part in excluded for part in path.parts):
+                  continue
+              if path.stat().st_size > 5_000_000:
+                  continue
+              files.append(path)
+
+          # Busca por tokens exatos; os resultados sao candidatos, nao definicoes comprovadas.
+          occurrences = defaultdict(list)
+          for path in files:
+              try:
+                  data = path.read_text(encoding="utf-8", errors="replace")
+              except OSError:
+                  continue
+              for line_no, line in enumerate(data.splitlines(), 1):
+                  for symbol in symbols:
+                      if re.search(r"(?<!\w)" + re.escape(symbol) + r"(?!\w)", line):
+                          score = 0
+                          stripped = line.strip()
+                          if stripped.startswith(("extern ", "#", "//", "/*", "*")):
+                              score -= 2
+                          if re.search(r"(?<!\w)" + re.escape(symbol) + r"\s*\(", line):
+                              score += 1
+                          if re.search(r"(?<!\w)" + re.escape(symbol) + r"\s*(?:=|;|\[)", line):
+                              score += 1
+                          if "src/gen/" in str(path) or "snesrecomp/" in str(path):
+                              score += 1
+                          occurrences[symbol].append((score, str(path), line_no, stripped[:180]))
+
+          with (out / "mapa-simbolos.csv").open("w", newline="", encoding="utf-8") as f:
+              writer = csv.writer(f)
+              writer.writerow(["simbolo", "arquivo_candidato", "linha", "trecho", "pontuacao_heuristica"])
+              for symbol in symbols:
+                  hits = sorted(occurrences[symbol], key=lambda x: (-x[0], x[1], x[2]))
+                  for score, path, line_no, excerpt in hits[:12]:
+                      writer.writerow([symbol, path, line_no, excerpt, score])
+                  if not hits:
+                      writer.writerow([symbol, "NAO LOCALIZADO", "", "", ""])
+
+          with (out / "resumo.txt").open("w", encoding="utf-8") as f:
+              f.write("TESTE 23 - MAPA DE DEPENDENCIAS MMX\n")
+              f.write(f"Simbolos indefinidos unicos (apos excluir definicoes dos dois objetos): {len(symbols)}\n")
+              f.write(f"Arquivos fonte examinados: {len(files)}\n")
+              f.write(f"Simbolos com alguma ocorrencia: {sum(bool(occurrences[s]) for s in symbols)}\n")
+              f.write(f"Simbolos sem ocorrencias: {sum(not occurrences[s] for s in symbols)}\n\n")
+              f.write("IMPORTANTE: ocorrencia textual nao prova que o arquivo define o simbolo.\n")
+              f.write("Use mapa-simbolos.csv para escolher os proximos modulos a compilar.\n")
+              f.write("Nenhum NRO foi gerado e nenhum arquivo original foi alterado.\n\n")
+              for s in symbols:
+                  hits = sorted(occurrences[s], key=lambda x: (-x[0], x[1], x[2]))
+                  f.write(f"{s}: {', '.join(dict.fromkeys(h[1] for h in hits[:5])) or 'NAO LOCALIZADO'}\n")
+          print((out / "resumo.txt").read_text()[:7000])
+          PY
+          python3 build-switch/test23/mapear.py
+
+      - name: Disponibilizar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste23-Relatorios
+          path: build-switch/test23/
+          if-no-files-found: warn
