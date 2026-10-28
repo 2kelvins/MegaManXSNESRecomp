@@ -1,4 +1,4 @@
-name: Switch - Mega Man X Teste 50
+name: Switch - Mega Man X Teste 50.1
 
 on:
   workflow_dispatch:
@@ -12,6 +12,12 @@ jobs:
     container:
       image: python:3.12-slim
     steps:
+      - name: Instalar Git para checkout com submodulos
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
       - name: Checkout com submodulos
         uses: actions/checkout@v4
         with:
@@ -20,12 +26,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          OUT=build-switch/test50
+          OUT=build-switch/test50_1
           mkdir -p "$OUT"
           python3 - <<'PY'
           from pathlib import Path
           import ast, csv, re, subprocess
-          out=Path('build-switch/test50')
+          out=Path('build-switch/test50_1')
           roots=[Path('snesrecomp/recompiler/v2'),Path('snesrecomp/tools'),Path('snesrecomp/runner/src'),Path('recomp'),Path('src/gen'),Path('variants')]
           scripts=[Path('snesrecomp/recompiler/v2/program_emit.py'),Path('snesrecomp/tools/v2_regen.py'),Path('snesrecomp/tools/sdk_generate.py')]
           scripts=[p for p in scripts if p.exists()]
@@ -86,6 +92,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: MegaManX-Switch-Teste50-Relatorios
-          path: build-switch/test50/
+          name: MegaManX-Switch-Teste50_1-Relatorios
+          path: build-switch/test50_1/
           if-no-files-found: warn
