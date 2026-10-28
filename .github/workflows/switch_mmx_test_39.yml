@@ -1,0 +1,144 @@
+name: Switch - Mega Man X Teste 39
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+    steps:
+      - name: Checkout com submodulos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Compilar os 35 modulos ja integrados
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=build-switch/test39
+          mkdir -p "$OUT/objetos" "$OUT/logs"
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          INCLUDES=(-I src -I "$DEVKITPRO/libnx/include")
+          for d in src/gen recomp variants/jp/config snesrecomp/runner/src snesrecomp/runner/src/desktop snesrecomp/runner/include "$DEVKITPRO/portlibs/switch/include" "$DEVKITPRO/portlibs/switch/include/SDL2"; do
+            if test -d "$d"; then INCLUDES+=("-I$d"); fi
+          done
+          sources=(
+            src/mmx_cpu_infra.c
+            src/mmx_rtl.c
+            snesrecomp/runner/src/common_cpu_infra.c
+            snesrecomp/runner/src/cpu_state.c
+            snesrecomp/runner/src/common_rtl.c
+            snesrecomp/runner/src/snes/snes.c
+            snesrecomp/runner/src/snes/ppu.c
+            snesrecomp/runner/src/snes/dma.c
+            snesrecomp/runner/src/snes/cart.c
+            snesrecomp/runner/src/cpu_trace.c
+            snesrecomp/runner/src/snes/apu.c
+            snesrecomp/runner/src/snes/cpu.c
+            snesrecomp/runner/src/snes/joypad.c
+            snesrecomp/runner/src/snes/dsp1.c
+            snesrecomp/runner/src/snes/dsp1_hle.c
+            snesrecomp/runner/src/snes/dsp.c
+            snesrecomp/runner/src/snes/dsp_shadow.c
+            snesrecomp/runner/src/snes/spc.c
+            src/mmx_spc_player.c
+            snesrecomp/runner/src/audio_trace.c
+            snesrecomp/runner/src/snes/audio_shadow.c
+            src/mmx_boss_rush_audio.c
+            snesrecomp/runner/src/mod_audio.c
+            src/mmx_boss_rush.c
+            src/mmx_coop.c
+            src/mmx_weapons.c
+            src/mmx_knc_bugfix.c
+            src/mmx_coop_view.c
+            src/mmx_zero.c
+            src/mmx_weapon_combat.c
+            src/mmx_wide_policy.c
+            snesrecomp/runner/src/snes/interp_bridge.c
+            snesrecomp/runner/src/snes/sdd1.c
+            src/mmx_replay.c
+            src/mmx_renderer.c
+          )
+          printf '%s\n' "${sources[@]}" > "$OUT/fontes-integradas.txt"
+          printf 'fonte,resultado\n' > "$OUT/compilacao.csv"
+          n=0
+          for src in "${sources[@]}"; do
+            n=$((n+1))
+            obj="$OUT/objetos/$(printf '%02d' "$n")_$(basename "$src" .c).o"
+            if "$CC" -std=gnu11 -O0 -Wall -fPIE "${INCLUDES[@]}" -c "$src" -o "$obj" > "$OUT/logs/$n.log" 2>&1; then
+              echo "$src,OK" >> "$OUT/compilacao.csv"
+            else
+              echo "$src,FALHOU" >> "$OUT/compilacao.csv"
+              exit 1
+            fi
+          done
+          mapfile -t objects < <(find "$OUT/objetos" -name '*.o' | sort)
+          if [[ "${#objects[@]}" -ne 35 ]]; then echo "Quantidade inesperada: ${#objects[@]}"; exit 1; fi
+          "$CC" -r "${objects[@]}" -o "$OUT/combinado.o" > "$OUT/link.log" 2>&1
+          "$DEVKITA64/bin/aarch64-none-elf-nm" -g -u "$OUT/combinado.o" | awk '$1=="U" {print $2}' | sort -u > "$OUT/restantes.txt"
+      - name: Encontrar definicoes candidatas no codigo
+        shell: bash
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import re, subprocess, collections, csv
+          out=Path('build-switch/test39')
+          remaining=out/'restantes.txt'
+          if not remaining.exists():
+              raise SystemExit('Faltou a lista de simbolos')
+          symbols=[s.strip() for s in remaining.read_text().splitlines() if s.strip()]
+          focus=('MmxRenderAssets','SnesReplayWriter','interp816','tier2_capture','g_tier2_capture','g_interp816')
+          selected=[s for s in symbols if s.startswith(focus)]
+          source_ext={'.c','.cc','.cpp','.cxx','.S','.s'}
+          files=[p for root in ('src','snesrecomp/runner/src') for p in Path(root).rglob('*') if p.is_file() and p.suffix in source_ext and 'build' not in p.parts]
+          compiled=set((out/'fontes-integradas.txt').read_text().splitlines())
+          rows=[]
+          for file in files:
+              if str(file) in compiled: continue
+              try: data=file.read_text(encoding='utf-8',errors='replace')
+              except OSError: continue
+              found=[]
+              for sym in selected:
+                  # Texto antes de '{' com declaracao de funcao, ou inicializacao de variavel.
+                  # Heuristica, nao garante que seja definicao compilavel.
+                  patterns=[rf'(?m)^\s*(?!extern\b)[^;{{}}\n]*\b{re.escape(sym)}\s*\([^;{{}}]*\)\s*\{{',rf'(?m)^\s*(?!extern\b)[^;{{}}\n]*\b{re.escape(sym)}\s*(?:=|;)']
+                  if any(re.search(pt,data) for pt in patterns): found.append(sym)
+              if found: rows.append((str(file),found))
+          rows.sort(key=lambda x:(-len(x[1]),x[0]))
+          with (out/'ranking.csv').open('w',newline='') as f:
+              w=csv.writer(f);w.writerow(['arquivo','quantidade','simbolos_candidatos'])
+              for file,found in rows:w.writerow([file,len(found),' '.join(found)])
+          with (out/'candidatos-detalhados.txt').open('w') as f:
+              for file,found in rows:
+                  f.write(f'{file}: {len(found)}\n')
+                  for s in found:f.write(f'  {s}\n')
+                  f.write('\n')
+          found_set=set(s for _,lst in rows for s in lst)
+          (out/'sem-candidato.txt').write_text('\n'.join(sorted(set(selected)-found_set))+'\n')
+          (out/'resumo.txt').write_text('\n'.join([
+              'TESTE 39 - DIAGNOSTICO DE IMPLEMENTACOES',
+              f'Modulos integrados: {len(compiled)}',
+              f'Simbolos indefinidos: {len(symbols)}',
+              f'Simbolos dos grupos priorizados: {len(selected)}',
+              f'Simbolos com possivel definicao textual: {len(found_set)}',
+              f'Arquivos candidatos: {len(rows)}',
+              'NOTA: candidatos textuais nao sao garantia de compilacao nem de resolucao.',
+              'Vinculacao parcial nao produz NRO executavel.'
+          ])+'\n')
+          print((out/'resumo.txt').read_text())
+          PYCODE
+      - name: Enviar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste39-Relatorios
+          path: build-switch/test39/
+          if-no-files-found: warn
