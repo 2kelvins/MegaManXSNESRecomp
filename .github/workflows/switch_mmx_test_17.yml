@@ -1,0 +1,92 @@
+name: Switch - Mega Man X Teste 17
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-thread-test:
+    name: Compilar NRO de teste pthread
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+    steps:
+      - name: Baixar repositorio
+        uses: actions/checkout@v4
+
+      - name: Criar codigo de teste
+        run: |
+          mkdir -p build-switch
+          cat > build-switch/thread_test.c <<'C_EOF'
+          #include <switch.h>
+          #include <pthread.h>
+          #include <stdio.h>
+
+          static volatile int worker_result = 0;
+
+          static void *worker(void *arg) {
+              (void)arg;
+              worker_result = 42;
+              return NULL;
+          }
+
+          int main(int argc, char **argv) {
+              (void)argc;
+              (void)argv;
+              consoleInit(NULL);
+              padConfigureInput(1, HidNpadStyleSet_NpadStandard);
+              PadState pad;
+              padInitializeDefault(&pad);
+
+              printf("MEGA MAN X - TESTE 17\n");
+              printf("Teste real de pthread\n\n");
+              pthread_t thread;
+              int create_result = pthread_create(&thread, NULL, worker, NULL);
+              if (create_result == 0) {
+                  int join_result = pthread_join(thread, NULL);
+                  printf("pthread_create: OK\n");
+                  printf("pthread_join: %s (%d)\n", join_result == 0 ? "OK" : "ERRO", join_result);
+                  printf("Resultado da thread: %d\n", worker_result);
+              } else {
+                  printf("pthread_create: ERRO %d\n", create_result);
+              }
+              printf("\nPressione + para sair.\n");
+              while (appletMainLoop()) {
+                  padUpdate(&pad);
+                  if (padGetButtonsDown(&pad) & HidNpadButton_Plus) break;
+                  consoleUpdate(NULL);
+              }
+              consoleExit(NULL);
+              return 0;
+          }
+          C_EOF
+
+      - name: Compilar e vincular pthread
+        run: |
+          set -eu
+          "$DEVKITA64/bin/aarch64-none-elf-gcc" \
+            -std=gnu11 -O2 -Wall -fPIE \
+            -I"$DEVKITPRO/libnx/include" \
+            -specs="$DEVKITPRO/libnx/switch.specs" \
+            -o build-switch/mmx-test17.elf \
+            build-switch/thread_test.c \
+            -L"$DEVKITPRO/libnx/lib" -lnx
+
+      - name: Converter ELF para NRO
+        run: |
+          set -eu
+          "$DEVKITPRO/tools/bin/elf2nro" \
+            build-switch/mmx-test17.elf \
+            build-switch/mmx-test17.nro
+
+      - name: Disponibilizar NRO
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste17
+          path: build-switch/mmx-test17.nro
+          if-no-files-found: error
