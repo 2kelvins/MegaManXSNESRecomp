@@ -34,6 +34,21 @@ jobs:
           test -x "$DEVKITPRO/tools/bin/elf2nro"
           echo "Ferramentas encontradas!"
 
+      - name: Teste 15 - Verificar suporte a ucontext
+        run: |
+          echo "Verificando ucontext.h no devkitPro..."
+
+          printf '#include <ucontext.h>\nint main(void) { return 0; }\n' > /tmp/test_ucontext.c
+
+          if "$DEVKITA64/bin/aarch64-none-elf-gcc" \
+            -c /tmp/test_ucontext.c \
+            -o /tmp/test_ucontext.o; then
+            echo "RESULTADO: ucontext.h disponivel!"
+          else
+            echo "RESULTADO: ucontext.h indisponivel."
+            echo "Precisaremos de outra implementacao de fibers."
+          fi
+          
       - name: Compilar programa para Switch
         run: |
           set -eu
