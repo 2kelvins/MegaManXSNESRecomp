@@ -1,0 +1,159 @@
+name: Switch - Mega Man X Teste 35
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  coop-weapons:
+    name: Integrar cooperacao e armas e contar simbolos
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+    steps:
+      - name: Baixar repositorio e submodulos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Compilar base de 24 modulos e novos componentes
+        shell: bash
+        run: |
+          set -uo pipefail
+          OUT=build-switch/test35
+          mkdir -p "$OUT/base" "$OUT/novo"
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          INCLUDES=(-I src -I "$DEVKITPRO/libnx/include")
+          for d in src/gen recomp variants/jp/config snesrecomp/runner/src snesrecomp/runner/src/desktop snesrecomp/runner/include "$DEVKITPRO/portlibs/switch/include" "$DEVKITPRO/portlibs/switch/include/SDL2"; do
+            if test -d "$d"; then INCLUDES+=("-I$d"); fi
+          done
+          sources=(
+            src/mmx_cpu_infra.c
+            src/mmx_rtl.c
+            snesrecomp/runner/src/common_cpu_infra.c
+            snesrecomp/runner/src/cpu_state.c
+            snesrecomp/runner/src/common_rtl.c
+            snesrecomp/runner/src/snes/snes.c
+            snesrecomp/runner/src/snes/ppu.c
+            snesrecomp/runner/src/snes/dma.c
+            snesrecomp/runner/src/snes/cart.c
+            snesrecomp/runner/src/cpu_trace.c
+            snesrecomp/runner/src/snes/apu.c
+            snesrecomp/runner/src/snes/cpu.c
+            snesrecomp/runner/src/snes/joypad.c
+            snesrecomp/runner/src/snes/dsp1.c
+            snesrecomp/runner/src/snes/dsp1_hle.c
+            snesrecomp/runner/src/snes/dsp.c
+            snesrecomp/runner/src/snes/dsp_shadow.c
+            snesrecomp/runner/src/snes/spc.c
+            src/mmx_spc_player.c
+            snesrecomp/runner/src/audio_trace.c
+            snesrecomp/runner/src/snes/audio_shadow.c
+            src/mmx_boss_rush_audio.c
+            snesrecomp/runner/src/mod_audio.c
+            src/mmx_boss_rush.c
+          )
+          printf 'grupo,fonte,resultado\n' > "$OUT/compilacao.csv"
+          idx=0
+          for source in "${sources[@]}"; do
+            idx=$((idx+1))
+            label="$(printf '%02d' "$idx")_$(basename "$source" .c)"
+            if test ! -f "$source"; then
+              printf 'base,%s,NAO_ENCONTRADO\n' "$source" >> "$OUT/compilacao.csv"
+              continue
+            fi
+            if "$CC" -std=gnu11 -O0 -Wall -fPIE "${INCLUDES[@]}" -c "$source" -o "$OUT/base/$label.o" > "$OUT/base/$label.log" 2>&1; then
+              printf 'base,%s,OK\n' "$source" >> "$OUT/compilacao.csv"
+            else
+              printf 'base,%s,FALHOU\n' "$source" >> "$OUT/compilacao.csv"
+              rm -f "$OUT/base/$label.o"
+              echo "Falha: $source"; head -40 "$OUT/base/$label.log"
+            fi
+          done
+          candidates=(
+            src/mmx_coop.c
+            src/mmx_coop_views.c
+            src/mmx_weapons.c
+            src/mmx_knc_bugfix.c
+          )
+          for source in "${candidates[@]}"; do
+            label="$(basename "$source" .c)"
+            if test ! -f "$source"; then
+              printf 'novo,%s,NAO_ENCONTRADO\n' "$source" >> "$OUT/compilacao.csv"
+              echo "Arquivo nao encontrado: $source"
+              continue
+            fi
+            if "$CC" -std=gnu11 -O0 -Wall -fPIE "${INCLUDES[@]}" -c "$source" -o "$OUT/novo/$label.o" > "$OUT/novo/$label.log" 2>&1; then
+              printf 'novo,%s,OK\n' "$source" >> "$OUT/compilacao.csv"
+            else
+              printf 'novo,%s,FALHOU\n' "$source" >> "$OUT/compilacao.csv"
+              rm -f "$OUT/novo/$label.o"
+              echo "Falha: $source"; head -60 "$OUT/novo/$label.log"
+            fi
+          done
+
+      - name: Medir simbolos e tentar vinculacao parcial
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, re, csv
+          out = Path('build-switch/test35')
+          nm = '/opt/devkitpro/devkitA64/bin/aarch64-none-elf-nm'
+          cc = '/opt/devkitpro/devkitA64/bin/aarch64-none-elf-gcc'
+          base = sorted((out/'base').glob('*.o'))
+          added = sorted((out/'novo').glob('*.o'))
+          def get_symbols(objects):
+              defined, undefined = set(), set()
+              for obj in objects:
+                  p = subprocess.run([nm, '-g', str(obj)], capture_output=True, text=True)
+                  if p.returncode:
+                      raise RuntimeError(f'nm falhou em {obj}: {p.stderr}')
+                  for line in p.stdout.splitlines():
+                      m = re.match(r'^\s*(?:[0-9a-fA-F]+\s+)?([A-Za-z])\s+(\S+)$', line)
+                      if m:
+                          typ, sym = m.groups()
+                          if typ.upper() == 'U': undefined.add(sym)
+                          elif typ.upper() != 'N': defined.add(sym)
+              return defined, undefined-defined
+          base_defs, base_undef = get_symbols(base)
+          all_objs = base + added
+          new_defs, new_undef = get_symbols(all_objs)
+          resolved = sorted(base_undef - new_undef)
+          introduced = sorted(new_undef - base_undef)
+          for name, items in [('resolvidos.txt',resolved),('novos-indefinidos.txt',introduced),('restantes.txt',sorted(new_undef)),('simbolos-definidos-novos.txt',sorted(get_symbols(added)[0]) if added else [])]:
+              (out/name).write_text('\n'.join(items)+'\n', encoding='utf-8')
+          summary = [
+              'TESTE 35 - COOPERACAO E ARMAS',
+              f'Modulos base compilados: {len(base)}/24',
+              f'Modulos novos compilados: {len(added)}/4',
+              f'Simbolos indefinidos na base: {len(base_undef)}',
+              f'Simbolos indefinidos apos Boss Rush: {len(new_undef)}',
+              f'Dependencias da base resolvidas: {len(resolved)}',
+              f'Novas dependencias introduzidas: {len(introduced)}',
+              'A contagem e estatica; nao confirma audio funcional.'
+          ]
+          if len(base)==24 and added:
+              for name, objs in [('base',base),('ampliado',all_objs)]:
+                  p = subprocess.run([cc,'-r',*[str(x) for x in objs],'-o',str(out/f'{name}.o')],capture_output=True,text=True)
+                  (out/f'{name}.link.log').write_text(p.stdout+p.stderr)
+                  summary.append(f'Vinculacao parcial {name}: codigo {p.returncode}')
+          else:
+              summary.append('Vinculacao parcial nao realizada: base incompleta ou nenhum modulo novo compilado.')
+          (out/'resumo.txt').write_text('\n'.join(summary)+'\n')
+          print('\n'.join(summary))
+          PY
+
+      - name: Disponibilizar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste35-Relatorios
+          path: build-switch/test35/
+          if-no-files-found: warn
