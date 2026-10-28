@@ -1,0 +1,88 @@
+name: Switch - Mega Man X Teste 25
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sdl-diagnosis:
+    name: Diagnosticar dependencia SDL do common_rtl
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+    steps:
+      - name: Baixar repositorio e submodulos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Investigar includes e SDL no motor
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=build-switch/test25
+          mkdir -p "$OUT"
+          {
+            echo '=== Dependencia SDL do common_rtl ==='
+            echo '=== Primeiras 110 linhas de common_rtl.c ==='
+            sed -n '1,110p' snesrecomp/runner/src/common_rtl.c
+            echo '=== config.h ==='
+            sed -n '1,180p' snesrecomp/runner/src/desktop/config.h
+            echo '=== sdl_compat.h ==='
+            sed -n '1,240p' snesrecomp/runner/src/desktop/sdl_compat.h
+            echo '=== Includes diretos de common_rtl.c ==='
+            grep -nE '^[[:space:]]*#[[:space:]]*include' snesrecomp/runner/src/common_rtl.c || true
+            echo '=== Referencias a SDL e dependencias de desktop ==='
+            grep -nE 'SDL_|SDL\.h|SDL2/|sdl_|__SWITCH__|__ANDROID__|_WIN32|__linux__' \
+              snesrecomp/runner/src/common_rtl.c \
+              snesrecomp/runner/src/desktop/config.h \
+              snesrecomp/runner/src/desktop/sdl_compat.h || true
+            echo '=== Arquivos config.h no projeto ==='
+            find snesrecomp src -name config.h -o -name sdl_compat.h | head -70
+            echo '=== Bibliotecas/headers SDL disponiveis no container ==='
+            for d in /usr/include/SDL2 /usr/include/SDL.h "$DEVKITPRO/portlibs/switch/include/SDL2" "$DEVKITPRO/portlibs/switch/include/SDL.h"; do
+              if test -e "$d"; then echo "PRESENTE: $d"; else echo "AUSENTE: $d"; fi
+            done
+          } > "$OUT/investigacao.txt" 2>&1
+
+      - name: Testar compilacao com os headers disponiveis
+        shell: bash
+        run: |
+          set -u
+          OUT=build-switch/test25
+          mkdir -p "$OUT"
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          INCLUDES=(-I src -I "$DEVKITPRO/libnx/include")
+          for d in src/gen recomp variants/jp/config snesrecomp/runner/src snesrecomp/runner/src/desktop snesrecomp/runner/include "$DEVKITPRO/portlibs/switch/include" "$DEVKITPRO/portlibs/switch/include/SDL2"; do
+            if test -d "$d"; then INCLUDES+=("-I$d"); fi
+          done
+          "$CC" -std=gnu11 -O0 -Wall -fPIE "${INCLUDES[@]}" \
+            -c snesrecomp/runner/src/common_rtl.c \
+            -o "$OUT/common_rtl.o" > "$OUT/compilacao.log" 2>&1
+          STATUS=$?
+          {
+            echo "TESTE 25 - DIAGNOSTICO SDL"
+            if test "$STATUS" -eq 0; then
+              echo "common_rtl.c: COMPILOU"
+            else
+              echo "common_rtl.c: FALHOU (codigo $STATUS)"
+              echo "A causa exata esta em compilacao.log"
+            fi
+            echo "Este teste nao modifica fontes nem gera NRO."
+          } | tee "$OUT/resumo.txt"
+          echo '=== Primeiras mensagens de compilacao ==='
+          head -90 "$OUT/compilacao.log"
+          exit 0
+
+      - name: Disponibilizar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste25-Relatorios
+          path: build-switch/test25/
+          if-no-files-found: warn
