@@ -1,0 +1,129 @@
+name: Switch - Mega Man X Teste 19
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-fiber-test:
+    name: Compilar teste de fibers no Switch
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+    steps:
+      - name: Baixar repositorio e submodulos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Conferir codigo original de fibers
+        run: |
+          set -eu
+          test -f snesrecomp/runner/src/desktop/fiber_compat.c
+          test -f snesrecomp/runner/src/desktop/fiber_compat.h
+
+      - name: Criar programa de diagnostico
+        run: |
+          set -eu
+          mkdir -p build-switch
+          cat > build-switch/fiber_test.c <<'C_EOF'
+          #include <switch.h>
+          #include <stdio.h>
+          #include "fiber_compat.h"
+
+          static void *scheduler;
+          static void *fiber_a;
+          static void *fiber_b;
+          static volatile int a_count;
+          static volatile int b_count;
+
+          static void task_a(void *unused) {
+              (void)unused;
+              for (;;) {
+                  ++a_count;
+                  SwitchToFiber(scheduler);
+              }
+          }
+
+          static void task_b(void *unused) {
+              (void)unused;
+              for (;;) {
+                  ++b_count;
+                  SwitchToFiber(scheduler);
+              }
+          }
+
+          int main(int argc, char **argv) {
+              (void)argc;
+              (void)argv;
+              consoleInit(NULL);
+              padConfigureInput(1, HidNpadStyleSet_NpadStandard);
+              PadState pad;
+              padInitializeDefault(&pad);
+              printf("MEGA MAN X - TESTE 19\n");
+              printf("Fibers originais via pthread\n\n");
+              consoleUpdate(NULL);
+
+              scheduler = ConvertThreadToFiber(NULL);
+              fiber_a = CreateFiber(256 * 1024, task_a, NULL);
+              fiber_b = CreateFiber(256 * 1024, task_b, NULL);
+              if (!scheduler || !fiber_a || !fiber_b) {
+                  printf("ERRO: falha ao criar fibers\n");
+              } else {
+                  SwitchToFiber(fiber_a);
+                  SwitchToFiber(fiber_b);
+                  SwitchToFiber(fiber_a);
+                  SwitchToFiber(fiber_b);
+                  printf("Fiber A: %d (esperado 2)\n", a_count);
+                  printf("Fiber B: %d (esperado 2)\n", b_count);
+                  printf("Resultado: %s\n",
+                         a_count == 2 && b_count == 2 ? "OK" : "ERRO");
+              }
+              printf("\nPressione + para sair.\n");
+              /* O backend pthread original nao oferece exclusao segura de
+                 fibers estacionadas. Nao chamar DeleteFiber neste teste. */
+              while (appletMainLoop()) {
+                  padUpdate(&pad);
+                  if (padGetButtonsDown(&pad) & HidNpadButton_Plus) break;
+                  consoleUpdate(NULL);
+              }
+              consoleExit(NULL);
+              return 0;
+          }
+          C_EOF
+
+      - name: Compilar implementacao pthread original
+        run: |
+          set -eu
+          "$DEVKITA64/bin/aarch64-none-elf-gcc" \
+            -std=gnu11 -O2 -Wall -fPIE -D__ANDROID__ \
+            -Isnesrecomp/runner/src/desktop \
+            -I"$DEVKITPRO/libnx/include" \
+            -c snesrecomp/runner/src/desktop/fiber_compat.c \
+            -o build-switch/fiber_compat.o
+
+      - name: Compilar e vincular NRO de diagnostico
+        run: |
+          set -eu
+          "$DEVKITA64/bin/aarch64-none-elf-gcc" \
+            -std=gnu11 -O2 -Wall -fPIE \
+            -Isnesrecomp/runner/src/desktop \
+            -I"$DEVKITPRO/libnx/include" \
+            -specs="$DEVKITPRO/libnx/switch.specs" \
+            -o build-switch/mmx-test19.elf \
+            build-switch/fiber_test.c build-switch/fiber_compat.o \
+            -L"$DEVKITPRO/libnx/lib" -lnx
+          "$DEVKITPRO/tools/bin/elf2nro" \
+            build-switch/mmx-test19.elf build-switch/mmx-test19.nro
+
+      - name: Disponibilizar NRO
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste19
+          path: build-switch/mmx-test19.nro
+          if-no-files-found: error
