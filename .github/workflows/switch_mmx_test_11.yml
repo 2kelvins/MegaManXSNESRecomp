@@ -48,6 +48,21 @@ jobs:
             echo "RESULTADO: ucontext.h indisponivel."
             echo "Precisaremos de outra implementacao de fibers."
           fi
+
+       - name: Teste 16 - Verificar suporte a pthread
+         run: |
+          echo "Verificando pthread.h no devkitPro..."
+
+          printf '#include <pthread.h>\nint main(void) { pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER; return pthread_mutex_destroy(&m); }\n' > /tmp/test_pthread.c
+
+          if "$DEVKITA64/bin/aarch64-none-elf-gcc" \
+            -std=gnu11 \
+            -c /tmp/test_pthread.c \
+            -o /tmp/test_pthread.o; then
+            echo "RESULTADO: pthread.h disponivel!"
+          else
+            echo "RESULTADO: pthread.h indisponivel."
+          fi
           
       - name: Compilar programa para Switch
         run: |
