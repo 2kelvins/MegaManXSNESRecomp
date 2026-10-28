@@ -1,0 +1,136 @@
+name: Switch - Mega Man X Teste 26
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integrate-five:
+    name: Compilar e vincular cinco modulos MMX
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+    steps:
+      - name: Baixar repositorio e submodulos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Compilar os cinco modulos para ARM64
+        shell: bash
+        run: |
+          set -uo pipefail
+          OUT=build-switch/test26
+          mkdir -p "$OUT"
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          INCLUDES=(-I src -I "$DEVKITPRO/libnx/include")
+          for d in src/gen recomp variants/jp/config snesrecomp/runner/src snesrecomp/runner/src/desktop snesrecomp/runner/include "$DEVKITPRO/portlibs/switch/include" "$DEVKITPRO/portlibs/switch/include/SDL2"; do
+            if test -d "$d"; then INCLUDES+=("-I$d"); fi
+          done
+          printf 'modulo,resultado\n' > "$OUT/compilacao.csv"
+          sources=(
+            src/mmx_cpu_infra.c
+            src/mmx_rtl.c
+            snesrecomp/runner/src/common_cpu_infra.c
+            snesrecomp/runner/src/cpu_state.c
+            snesrecomp/runner/src/common_rtl.c
+          )
+          for src in "${sources[@]}"; do
+            name="$(basename "$src" .c)"
+            if "$CC" -std=gnu11 -O0 -Wall -fPIE "${INCLUDES[@]}" \
+              -c "$src" -o "$OUT/$name.o" > "$OUT/$name.compile.log" 2>&1; then
+              printf '%s,OK\n' "$name" >> "$OUT/compilacao.csv"
+              echo "OK: $name"
+            else
+              printf '%s,FALHOU\n' "$name" >> "$OUT/compilacao.csv"
+              echo "FALHOU: $name"
+              head -40 "$OUT/$name.compile.log"
+              rm -f "$OUT/$name.o"
+            fi
+          done
+
+      - name: Vincular objetos sem descartar codigo e medir dependencias
+        shell: bash
+        run: |
+          set -uo pipefail
+          OUT=build-switch/test26
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          NM="$DEVKITA64/bin/aarch64-none-elf-nm"
+          original=("$OUT/mmx_cpu_infra.o" "$OUT/mmx_rtl.o")
+          all=("${original[@]}" "$OUT/common_cpu_infra.o" "$OUT/cpu_state.o" "$OUT/common_rtl.o")
+          {
+            echo "TESTE 26 - INTEGRACAO DE CINCO MODULOS"
+            echo "Objetivo: vincular os objetos sem descartar secoes e identificar dependencias."
+            echo "O arquivo combinado.o nao e um executavel nem um NRO."
+            echo
+          } > "$OUT/resumo.txt"
+
+          if test -f "${original[0]}" && test -f "${original[1]}"; then
+            "$CC" -r "${original[@]}" -o "$OUT/base.o" > "$OUT/base.link.log" 2>&1
+            echo "Vinculacao parcial dos dois originais: $?" >> "$OUT/resumo.txt"
+          else
+            echo "Base: faltam objetos compilados" >> "$OUT/resumo.txt"
+          fi
+
+          missing=0
+          for obj in "${all[@]}"; do
+            if test ! -f "$obj"; then
+              echo "Objeto ausente: $obj" >> "$OUT/resumo.txt"
+              missing=1
+            fi
+          done
+          if test "$missing" -eq 0; then
+            "$CC" -r "${all[@]}" -o "$OUT/combinado.o" > "$OUT/combinado.link.log" 2>&1
+            status=$?
+            echo "Vinculacao parcial dos cinco objetos: $status" >> "$OUT/resumo.txt"
+            if test "$status" -ne 0; then
+              head -80 "$OUT/combinado.link.log"
+            fi
+          else
+            echo "Vinculacao dos cinco nao executada: compilacao incompleta" >> "$OUT/resumo.txt"
+          fi
+
+          for target in base combinado; do
+            if test -f "$OUT/$target.o"; then
+              "$NM" -g --undefined-only "$OUT/$target.o" > "$OUT/$target.indefinidos.txt" 2>&1
+              "$NM" -g --defined-only "$OUT/$target.o" > "$OUT/$target.definidos.txt" 2>&1
+            fi
+          done
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path("build-switch/test26")
+          def syms(file):
+              if not file.exists():
+                  return set()
+              return set(re.findall(r"^\s+U\s+(\S+)\s*$", file.read_text(errors="replace"), re.M))
+          base = syms(p/"base.indefinidos.txt")
+          combined = syms(p/"combinado.indefinidos.txt")
+          if (p/"base.o").exists() and (p/"combinado.o").exists():
+              resolved = sorted(base - combined)
+              introduced = sorted(combined - base)
+              (p/"resolvidos.txt").write_text("\n".join(resolved)+"\n")
+              (p/"novos-indefinidos.txt").write_text("\n".join(introduced)+"\n")
+              (p/"restantes.txt").write_text("\n".join(sorted(combined))+"\n")
+              with (p/"resumo.txt").open("a") as f:
+                  f.write(f"\nIndefinidos nos 2 objetos: {len(base)}\n")
+                  f.write(f"Indefinidos nos 5 objetos: {len(combined)}\n")
+                  f.write(f"Dependencias originais resolvidas: {len(resolved)}\n")
+                  f.write(f"Dependencias novas introduzidas: {len(introduced)}\n")
+                  f.write("Contagem inclui simbolos de bibliotecas do sistema.\n")
+          PY
+          cat "$OUT/resumo.txt"
+
+      - name: Publicar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste26-Relatorios
+          path: build-switch/test26/
+          if-no-files-found: warn
