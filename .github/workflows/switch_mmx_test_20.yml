@@ -1,0 +1,81 @@
+name: Switch - Mega Man X Teste 20
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile-real-modules:
+    name: Diagnosticar compilacao ARM64 dos modulos MMX
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+    steps:
+      - name: Baixar repositorio e submodulos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Localizar arquivos e dependencias
+        shell: bash
+        run: |
+          set -eu
+          mkdir -p build-switch/test20
+          echo '=== Arquivos principais ==='
+          for f in src/mmx_cpu_infra.c src/mmx_rtl.c; do
+            if test -f "$f"; then echo "OK: $f"; else echo "AUSENTE: $f"; fi
+          done
+          echo '=== Cabecalhos importantes ==='
+          find . -name fiber_compat.h -o -name common_cpu_infra.h -o -name funcs.h | head -60
+          echo '=== Compilador ==='
+          "$DEVKITA64/bin/aarch64-none-elf-gcc" --version | head -1
+
+      - name: Compilar modulos reais individualmente
+        shell: bash
+        run: |
+          set -u
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          mkdir -p build-switch/test20
+          # Diretorios do projeto original e do submodulo snesrecomp.
+          # A existencia de cada diretorio e verificada para evitar -I invalidos.
+          INCLUDE_ARGS=(-I src -I "$DEVKITPRO/libnx/include")
+          for dir in src/gen recomp variants/jp/config snesrecomp/runner/src snesrecomp/runner/src/desktop snesrecomp/runner/include; do
+            if test -d "$dir"; then INCLUDE_ARGS+=("-I$dir"); fi
+          done
+          : > build-switch/test20/resumo.txt
+          for module in mmx_cpu_infra mmx_rtl; do
+            echo "===== $module =====" | tee -a build-switch/test20/resumo.txt
+            if test ! -f "src/$module.c"; then
+              echo "ARQUIVO AUSENTE: src/$module.c" | tee -a build-switch/test20/resumo.txt
+              continue
+            fi
+            "$CC" -std=gnu11 -O0 -Wall -fPIE \
+              "${INCLUDE_ARGS[@]}" \
+              -c "src/$module.c" \
+              -o "build-switch/test20/$module.o" \
+              > "build-switch/test20/$module.log" 2>&1
+            status=$?
+            if test "$status" -eq 0; then
+              echo "RESULTADO: $module COMPILOU" | tee -a build-switch/test20/resumo.txt
+            else
+              echo "RESULTADO: $module FALHOU (codigo $status)" | tee -a build-switch/test20/resumo.txt
+              echo "--- Primeiras mensagens de erro ---"
+              head -65 "build-switch/test20/$module.log"
+            fi
+          done
+          echo '===== RESUMO FINAL ====='
+          cat build-switch/test20/resumo.txt
+          echo 'Teste diagnostico concluido; nenhum NRO foi gerado.'
+
+      - name: Disponibilizar relatorios de compilacao
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste20-Relatorios
+          path: build-switch/test20/
+          if-no-files-found: warn
