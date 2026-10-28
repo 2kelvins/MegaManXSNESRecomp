@@ -1,0 +1,172 @@
+name: Switch - Mega Man X Teste 42.1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  teste-link-final:
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+    steps:
+      - name: Checkout com submodulos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Compilar 39 modulos e diagnosticar link real
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=build-switch/test42_1
+          mkdir -p "$OUT/objetos" "$OUT/logs"
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          INCLUDES=(-I src -I "$DEVKITPRO/libnx/include")
+          for d in src/gen recomp variants/jp/config snesrecomp/runner/src snesrecomp/runner/src/desktop snesrecomp/runner/include "$DEVKITPRO/portlibs/switch/include" "$DEVKITPRO/portlibs/switch/include/SDL2"; do
+            if test -d "$d"; then INCLUDES+=("-I$d"); fi
+          done
+          sources=(
+            src/mmx_cpu_infra.c
+            src/mmx_rtl.c
+            snesrecomp/runner/src/common_cpu_infra.c
+            snesrecomp/runner/src/cpu_state.c
+            snesrecomp/runner/src/common_rtl.c
+            snesrecomp/runner/src/snes/snes.c
+            snesrecomp/runner/src/snes/ppu.c
+            snesrecomp/runner/src/snes/dma.c
+            snesrecomp/runner/src/snes/cart.c
+            snesrecomp/runner/src/cpu_trace.c
+            snesrecomp/runner/src/snes/apu.c
+            snesrecomp/runner/src/snes/cpu.c
+            snesrecomp/runner/src/snes/joypad.c
+            snesrecomp/runner/src/snes/dsp1.c
+            snesrecomp/runner/src/snes/dsp1_hle.c
+            snesrecomp/runner/src/snes/dsp.c
+            snesrecomp/runner/src/snes/dsp_shadow.c
+            snesrecomp/runner/src/snes/spc.c
+            src/mmx_spc_player.c
+            snesrecomp/runner/src/audio_trace.c
+            snesrecomp/runner/src/snes/audio_shadow.c
+            src/mmx_boss_rush_audio.c
+            snesrecomp/runner/src/mod_audio.c
+            src/mmx_boss_rush.c
+            src/mmx_coop.c
+            src/mmx_weapons.c
+            src/mmx_knc_bugfix.c
+            src/mmx_coop_view.c
+            src/mmx_zero.c
+            src/mmx_weapon_combat.c
+            src/mmx_wide_policy.c
+            snesrecomp/runner/src/snes/interp_bridge.c
+            snesrecomp/runner/src/snes/sdd1.c
+            src/mmx_replay.c
+            src/mmx_renderer.c
+            snesrecomp/runner/src/snes/tier2_capture.c
+            src/mmx_render_assets.c
+            snesrecomp/runner/src/diagnostics/replay_writer.c
+            snesrecomp/runner/src/snes/interp816.c
+          )
+          printf 'fonte,resultado\n' > "$OUT/compilacao.csv"
+          n=0
+          for src in "${sources[@]}"; do
+            n=$((n+1))
+            obj="$OUT/objetos/$(printf '%02d' "$n")_$(basename "$src" .c).o"
+            if "$CC" -std=gnu11 -O0 -Wall -fPIE "${INCLUDES[@]}" -c "$src" -o "$obj" > "$OUT/logs/$(printf '%02d' "$n").log" 2>&1; then
+              echo "$src,OK" >> "$OUT/compilacao.csv"
+            else
+              echo "$src,FALHOU" >> "$OUT/compilacao.csv"
+              exit 1
+            fi
+          done
+          mapfile -t objs < <(find "$OUT/objetos" -name '*.o' | sort)
+          test "${#objs[@]}" -eq 39
+          "$CC" -r "${objs[@]}" -o "$OUT/combinado.o" > "$OUT/link-parcial.log" 2>&1
+
+          # Ponto de entrada de diagnostico. Nao e inicializacao do jogo.
+          cat > "$OUT/main.c" <<'EOF'
+          #include <switch.h>
+          #include <stdio.h>
+          int main(int argc, char **argv) {
+              consoleInit(NULL);
+              printf("Mega Man X - diagnostico de vinculacao\n");
+              consoleUpdate(NULL);
+              consoleExit(NULL);
+              return 0;
+          }
+          EOF
+          "$CC" -O0 -fPIE -I "$DEVKITPRO/libnx/include" -c "$OUT/main.c" -o "$OUT/main.o" > "$OUT/main-compilacao.log" 2>&1
+
+          # Registrar ambiente para que a falha de link seja reproduzivel.
+          "$CC" -v > "$OUT/compiler-version.txt" 2>&1 || true
+          find "$DEVKITPRO" -name '*switch*.specs' -o -name 'libSDL2.a' -o -name 'libnx.a' > "$OUT/bibliotecas-encontradas.txt" 2>&1 || true
+          cat > "$OUT/link-attempts.txt" <<'EOF'
+          Tentativas de link de diagnostico (NAO e NRO jogavel).
+          Os 39 objetos sao forcados ao link para revelar dependencias reais.
+          A ordem das bibliotecas pode precisar ser ajustada depois.
+          EOF
+
+          # Tentar link final usando specs do Switch, SDL2, libnx e bibliotecas comuns.
+          # A falha e esperada e NAO interrompe a coleta de relatorios.
+          SPEC="$DEVKITPRO/libnx/switch.specs"
+          LIBS=(-L"$DEVKITPRO/portlibs/switch/lib" -L"$DEVKITPRO/libnx/lib"
+                -Wl,--start-group -lSDL2 -lnx -lm -lc -Wl,--end-group)
+          if [[ -f "$SPEC" ]]; then
+            echo "Usando specs: $SPEC" >> "$OUT/link-attempts.txt"
+            if "$CC" -specs="$SPEC" -fPIE -o "$OUT/diagnostico.elf" \
+                "$OUT/main.o" "$OUT/combinado.o" "${LIBS[@]}" \
+                > "$OUT/link-final.log" 2>&1; then
+              echo "LINK_FINAL_OK" > "$OUT/link-status.txt"
+            else
+              echo "LINK_FINAL_FALHOU" > "$OUT/link-status.txt"
+            fi
+          else
+            echo "Specs nao encontrado em $SPEC; tentativa sem specs" >> "$OUT/link-attempts.txt"
+            if "$CC" -fPIE -o "$OUT/diagnostico.elf" \
+                "$OUT/main.o" "$OUT/combinado.o" "${LIBS[@]}" \
+                > "$OUT/link-final.log" 2>&1; then
+              echo "LINK_FINAL_OK_SEM_SPECS" > "$OUT/link-status.txt"
+            else
+              echo "LINK_FINAL_FALHOU_SEM_SPECS" > "$OUT/link-status.txt"
+            fi
+          fi
+
+      - name: Resumir erros de vinculacao
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, subprocess
+          p=Path('build-switch/test42_1')
+          p.mkdir(parents=True,exist_ok=True)
+          log=(p/'link-final.log').read_text(errors='replace') if (p/'link-final.log').exists() else ''
+          missing=sorted(set(re.findall(r"(?:undefined reference to|undefined symbol:)\s*[`'\"]?([A-Za-z_][A-Za-z0-9_@.]*)",log)))
+          (p/'simbolos-link-final.txt').write_text('\n'.join(missing)+'\n' if missing else '')
+          status=(p/'link-status.txt').read_text().strip() if (p/'link-status.txt').exists() else 'NAO_EXECUTADO'
+          summary=[
+              'TESTE 42 - LINK FINAL DIAGNOSTICO',
+              'Modulos esperados: 39',
+              'Referencias indefinidas na base anterior: 179',
+              'Status: '+status,
+              'Simbolos indefinidos identificados no log: '+str(len(missing)),
+              'IMPORTANTE: erro de biblioteca/specs pode impedir diagnostico de simbolos.',
+              'Mesmo LINK_FINAL_OK nao significa que o jogo inicia ou funciona.',
+              'Nao foi empacotado NRO; objetivo e diagnosticar o linker.'
+          ]
+          (p/'resumo.txt').write_text('\n'.join(summary)+'\n')
+          print('\n'.join(summary))
+          PY
+
+      - name: Enviar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste42_1-Relatorios
+          path: build-switch/test42_1/
+          if-no-files-found: warn
