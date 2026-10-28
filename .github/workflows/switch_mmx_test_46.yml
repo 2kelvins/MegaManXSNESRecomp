@@ -1,0 +1,191 @@
+name: Switch - Mega Man X Teste 46
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  link-fibras:
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Compilar 45 modulos e adaptador isolado
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=build-switch/test46
+          mkdir -p "$OUT/objetos" "$OUT/logs"
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          INCLUDES=(-I src -I "$DEVKITPRO/libnx/include")
+          for d in src/gen recomp variants/jp/config snesrecomp/runner/src snesrecomp/runner/src/desktop snesrecomp/runner/include "$DEVKITPRO/portlibs/switch/include" "$DEVKITPRO/portlibs/switch/include/SDL2"; do
+            if test -d "$d"; then INCLUDES+=("-I$d"); fi
+          done
+          sources=(
+            src/mmx_cpu_infra.c
+            src/mmx_rtl.c
+            snesrecomp/runner/src/common_cpu_infra.c
+            snesrecomp/runner/src/cpu_state.c
+            snesrecomp/runner/src/common_rtl.c
+            snesrecomp/runner/src/snes/snes.c
+            snesrecomp/runner/src/snes/ppu.c
+            snesrecomp/runner/src/snes/dma.c
+            snesrecomp/runner/src/snes/cart.c
+            snesrecomp/runner/src/cpu_trace.c
+            snesrecomp/runner/src/snes/apu.c
+            snesrecomp/runner/src/snes/cpu.c
+            snesrecomp/runner/src/snes/joypad.c
+            snesrecomp/runner/src/snes/dsp1.c
+            snesrecomp/runner/src/snes/dsp1_hle.c
+            snesrecomp/runner/src/snes/dsp.c
+            snesrecomp/runner/src/snes/dsp_shadow.c
+            snesrecomp/runner/src/snes/spc.c
+            src/mmx_spc_player.c
+            snesrecomp/runner/src/audio_trace.c
+            snesrecomp/runner/src/snes/audio_shadow.c
+            src/mmx_boss_rush_audio.c
+            snesrecomp/runner/src/mod_audio.c
+            src/mmx_boss_rush.c
+            src/mmx_coop.c
+            src/mmx_weapons.c
+            src/mmx_knc_bugfix.c
+            src/mmx_coop_view.c
+            src/mmx_zero.c
+            src/mmx_weapon_combat.c
+            src/mmx_wide_policy.c
+            snesrecomp/runner/src/snes/interp_bridge.c
+            snesrecomp/runner/src/snes/sdd1.c
+            src/mmx_replay.c
+            src/mmx_renderer.c
+            snesrecomp/runner/src/snes/tier2_capture.c
+            src/mmx_render_assets.c
+            snesrecomp/runner/src/diagnostics/replay_writer.c
+            snesrecomp/runner/src/snes/interp816.c
+            snesrecomp/runner/src/snes/cx4.c
+            snesrecomp/runner/src/snes/sa1.c
+            snesrecomp/runner/src/snes/superfx.c
+            snesrecomp/runner/src/snes/snes_other.c
+            snesrecomp/runner/src/diagnostics/trace_writer.c
+            src/mmx_boss_rush_draw.c
+          )
+          : > "$OUT/compilacao.csv"
+          objects=()
+          i=0
+          for src in "${sources[@]}"; do
+            i=$((i+1))
+            obj="$OUT/objetos/$(printf '%02d' "$i")_$(basename "$src" .c).o"
+            if "$CC" -std=gnu11 -O0 -Wall -fPIE "${INCLUDES[@]}" -c "$src" -o "$obj" > "$OUT/logs/$(printf '%02d' "$i").log" 2>&1; then
+              echo "OK,$src" >> "$OUT/compilacao.csv"
+              objects+=("$obj")
+            else
+              echo "FALHOU,$src" >> "$OUT/compilacao.csv"
+              exit 1
+            fi
+          done
+          test "${#objects[@]}" -eq 45
+          "$CC" -r "${objects[@]}" -o "$OUT/sem-fibras.o" > "$OUT/link-parcial-base.log" 2>&1
+          FIBER=snesrecomp/runner/src/desktop/fiber_compat.c
+          # __ANDROID__ aplicado SOMENTE a este arquivo, para diagnostico.
+          "$CC" -std=gnu11 -O0 -Wall -fPIE -D__ANDROID__ "${INCLUDES[@]}" -c "$FIBER" -o "$OUT/fiber_compat.o" > "$OUT/fiber-compilacao.log" 2>&1
+          "$CC" -r "$OUT/sem-fibras.o" "$OUT/fiber_compat.o" -o "$OUT/com-fibras.o" > "$OUT/link-parcial-fibras.log" 2>&1
+          cat > "$OUT/main.c" <<'EOF'
+          #include <switch.h>
+          #include <stdio.h>
+          int main(int argc, char **argv) {
+              consoleInit(NULL);
+              printf("Mega Man X - Teste 46 de link\n");
+              consoleUpdate(NULL);
+              consoleExit(NULL);
+              return 0;
+          }
+          EOF
+          "$CC" -O0 -fPIE -I "$DEVKITPRO/libnx/include" -c "$OUT/main.c" -o "$OUT/main.o" > "$OUT/main-compilacao.log" 2>&1
+
+      - name: Tentar vinculacao final com e sem fibras
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          OUT=build-switch/test46
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          SPEC="$DEVKITPRO/libnx/switch.specs"
+          OPTS=()
+          if [[ -f "$SPEC" ]]; then OPTS+=("-specs=$SPEC"); fi
+          printf 'specs=%s\n' "${OPTS[*]:-nao-encontrado}" > "$OUT/config-link.txt"
+          printf 'libs: SDL2 nx m c pthread\n' >> "$OUT/config-link.txt"
+          for mode in sem-fibras com-fibras; do
+            if [[ "$mode" == sem-fibras ]]; then OBJ="$OUT/sem-fibras.o"; else OBJ="$OUT/com-fibras.o"; fi
+            if [[ ! -f "$OBJ" || ! -f "$OUT/main.o" ]]; then
+              echo "NAO_EXECUTADO" > "$OUT/${mode}-status.txt"
+              continue
+            fi
+            if "$CC" "${OPTS[@]}" -fPIE -o "$OUT/${mode}.elf" "$OUT/main.o" "$OBJ" \
+                -L"$DEVKITPRO/portlibs/switch/lib" -L"$DEVKITPRO/libnx/lib" \
+                -Wl,--start-group -lSDL2 -lnx -lm -lc -lpthread -Wl,--end-group \
+                > "$OUT/${mode}-link.log" 2>&1; then
+              echo "LINK_OK" > "$OUT/${mode}-status.txt"
+            else
+              echo "LINK_FALHOU" > "$OUT/${mode}-status.txt"
+            fi
+          done
+
+      - name: Comparar erros e simbolos
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess,re
+          p=Path('build-switch/test46');p.mkdir(parents=True,exist_ok=True)
+          nm='/opt/devkitpro/devkitA64/bin/aarch64-none-elf-nm'
+          def undefined(path):
+              if not path.exists(): return None
+              r=subprocess.run([nm,'-g',str(path)],capture_output=True,text=True,errors='replace')
+              if r.returncode: return None
+              d=set();u=set()
+              for line in r.stdout.splitlines():
+                  m=re.match(r'^\s*(?:[0-9a-fA-F]+\s+)?([A-Za-z])\s+(\S+)$',line)
+                  if m:
+                      typ,sym=m.groups()
+                      if typ.upper()=='U':u.add(sym)
+                      elif typ.upper()!='N':d.add(sym)
+              return u-d
+          base=undefined(p/'sem-fibras.o')
+          fiber=undefined(p/'com-fibras.o')
+          lines=['TESTE 46 - LINK REAL COM ADAPTADOR DE FIBRAS', '45 modulos do motor + adaptador isolado']
+          if base is not None:lines.append(f'Indefinidos sem fibras (parcial): {len(base)}')
+          if fiber is not None:lines.append(f'Indefinidos com fibras (parcial): {len(fiber)}')
+          if base is not None and fiber is not None:
+              solved=sorted(base-fiber);new=sorted(fiber-base)
+              lines += [f'Resolvidos pelo adaptador: {len(solved)}',f'Novos pelo adaptador: {len(new)}']
+              (p/'fibras-resolvidos.txt').write_text('\n'.join(solved)+'\n')
+              (p/'fibras-novos.txt').write_text('\n'.join(new)+'\n')
+          for mode in ('sem-fibras','com-fibras'):
+              status=(p/f'{mode}-status.txt').read_text().strip() if (p/f'{mode}-status.txt').exists() else 'NAO_EXECUTADO'
+              log=(p/f'{mode}-link.log').read_text(errors='replace') if (p/f'{mode}-link.log').exists() else ''
+              syms=sorted(set(re.findall(r'(?:undefined reference to|undefined symbol:)\s*[`\'\"]?([A-Za-z_][A-Za-z0-9_@.]*)',log)))
+              (p/f'{mode}-indefinidos-final.txt').write_text('\n'.join(syms)+'\n' if syms else '')
+              lines.append(f'{mode}: {status}; simbolos extraidos do log: {len(syms)}')
+          lines+=['Falhas de bibliotecas, specs ou flags podem impedir a analise completa.',
+                  'Nao executar os ELF gerados: adaptador experimental e inicializacao incompleta.',
+                  'Nenhum NRO jogavel foi produzido.']
+          (p/'resumo.txt').write_text('\n'.join(lines)+'\n')
+          print('\n'.join(lines))
+          PY
+
+      - name: Enviar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste46-Relatorios
+          path: build-switch/test46/
+          if-no-files-found: warn
