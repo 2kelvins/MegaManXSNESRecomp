@@ -1,0 +1,150 @@
+name: Switch - Mega Man X Teste 27
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snes-modules:
+    name: Localizar e compilar modulos SNES para ARM64
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+
+    steps:
+      - name: Baixar repositorio e submodulos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Localizar arquivos SNES e preparar compilacao
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-switch/test27
+          {
+            echo "TESTE 27 - MODULOS DE EMULACAO SNES"
+            echo "Procurando snes.c, ppu.c, dma.c e cart.c:"
+            find src snesrecomp -type f \( -name 'snes.c' -o -name 'ppu.c' -o -name 'dma.c' -o -name 'cart.c' \) | sort
+            echo
+            echo "Outros arquivos fonte relacionados ao SNES:"
+            find snesrecomp/runner/src -type f \( -name '*snes*.c' -o -name '*ppu*.c' -o -name '*dma*.c' -o -name '*cart*.c' \) | sort | head -100
+          } | tee build-switch/test27/localizacao.txt
+
+      - name: Compilar cinco modulos ja validados
+        shell: bash
+        run: |
+          set -uo pipefail
+          OUT=build-switch/test27
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          INCLUDES=(-I src -I "$DEVKITPRO/libnx/include")
+          for d in src/gen recomp variants/jp/config snesrecomp/runner/src snesrecomp/runner/src/desktop snesrecomp/runner/include "$DEVKITPRO/portlibs/switch/include" "$DEVKITPRO/portlibs/switch/include/SDL2"; do
+            if test -d "$d"; then INCLUDES+=("-I$d"); fi
+          done
+          mkdir -p "$OUT/base"
+          for src in \
+            src/mmx_cpu_infra.c \
+            src/mmx_rtl.c \
+            snesrecomp/runner/src/common_cpu_infra.c \
+            snesrecomp/runner/src/cpu_state.c \
+            snesrecomp/runner/src/common_rtl.c; do
+            name="$(basename "$src" .c)"
+            if "$CC" -std=gnu11 -O0 -Wall -fPIE "${INCLUDES[@]}" \
+              -c "$src" -o "$OUT/base/$name.o" > "$OUT/base/$name.log" 2>&1; then
+              echo "OK: $src"
+            else
+              echo "FALHOU: $src"
+              head -50 "$OUT/base/$name.log"
+            fi
+          done
+          printf '%s\n' "${INCLUDES[@]}" > "$OUT/includes.txt"
+
+      - name: Compilar candidatos SNES e comparar simbolos
+        shell: bash
+        run: |
+          set -uo pipefail
+          OUT=build-switch/test27
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          NM="$DEVKITA64/bin/aarch64-none-elf-nm"
+          mkdir -p "$OUT/snes"
+          INCLUDES=(-I src -I "$DEVKITPRO/libnx/include")
+          for d in src/gen recomp variants/jp/config snesrecomp/runner/src snesrecomp/runner/src/desktop snesrecomp/runner/include "$DEVKITPRO/portlibs/switch/include" "$DEVKITPRO/portlibs/switch/include/SDL2"; do
+            if test -d "$d"; then INCLUDES+=("-I$d"); fi
+          done
+          printf 'modulo,arquivo,resultado\n' > "$OUT/compilacao-snes.csv"
+          for name in snes ppu dma cart; do
+            mapfile -t candidates < <(find snesrecomp/runner/src src -type f -name "$name.c" | sort)
+            if test "${#candidates[@]}" -eq 0; then
+              echo "$name,NAO ENCONTRADO,SEM ARQUIVO" >> "$OUT/compilacao-snes.csv"
+              continue
+            fi
+            idx=0
+            for source in "${candidates[@]}"; do
+              idx=$((idx+1))
+              label="${name}_${idx}"
+              if "$CC" -std=gnu11 -O0 -Wall -fPIE "${INCLUDES[@]}" \
+                -c "$source" -o "$OUT/snes/$label.o" > "$OUT/snes/$label.log" 2>&1; then
+                echo "$name,$source,OK" >> "$OUT/compilacao-snes.csv"
+              else
+                echo "$name,$source,FALHOU" >> "$OUT/compilacao-snes.csv"
+                rm -f "$OUT/snes/$label.o"
+                echo "Falha: $source"
+                head -35 "$OUT/snes/$label.log"
+              fi
+            done
+          done
+
+          python3 - <<'PY'
+          import pathlib, re, subprocess
+          out = pathlib.Path("build-switch/test27")
+          nm = "/opt/devkitpro/devkitA64/bin/aarch64-none-elf-nm"
+          base = sorted((out/"base").glob("*.o"))
+          added = sorted((out/"snes").glob("*.o"))
+          def symbol_sets(objects):
+              defined, undefined = set(), set()
+              for obj in objects:
+                  p = subprocess.run([nm, "-g", str(obj)], capture_output=True, text=True)
+                  if p.returncode:
+                      continue
+                  for line in p.stdout.splitlines():
+                      match = re.match(r"^\s*(?:(?:[0-9a-fA-F]+)\s+)?([A-Za-z])\s+(\S+)$", line)
+                      if not match:
+                          continue
+                      kind, sym = match.groups()
+                      if kind.upper() == "U":
+                          undefined.add(sym)
+                      elif kind.upper() not in ("N",):
+                          defined.add(sym)
+              return defined, undefined - defined
+          bdef, bundef = symbol_sets(base)
+          adef, aundef = symbol_sets(base + added)
+          resolved = sorted(bundef - aundef)
+          introduced = sorted(aundef - bundef)
+          (out/"resolvidos.txt").write_text("\n".join(resolved)+"\n")
+          (out/"novos-indefinidos.txt").write_text("\n".join(introduced)+"\n")
+          (out/"restantes.txt").write_text("\n".join(sorted(aundef))+"\n")
+          with (out/"resumo.txt").open("w") as f:
+              f.write("TESTE 27 - MODULOS SNES\n")
+              f.write(f"Objetos base compilados: {len(base)}/5\n")
+              f.write(f"Novos objetos SNES compilados: {len(added)}\n")
+              f.write(f"Simbolos indefinidos na base: {len(bundef)}\n")
+              f.write(f"Simbolos indefinidos com novos modulos: {len(aundef)}\n")
+              f.write(f"Dependencias resolvidas: {len(resolved)}\n")
+              f.write(f"Dependencias introduzidas: {len(introduced)}\n")
+              f.write("Comparacao estatica de simbolos; nao prova vinculacao final.\n")
+              f.write("Nenhum arquivo fonte foi alterado; nenhum NRO foi gerado.\n")
+          print((out/"resumo.txt").read_text())
+          PY
+
+      - name: Publicar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste27-Relatorios
+          path: build-switch/test27/
+          if-no-files-found: warn
