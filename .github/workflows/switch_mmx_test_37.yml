@@ -1,0 +1,162 @@
+name: Switch - Mega Man X Teste 37
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integrar-modulos:
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+    steps:
+      - name: Baixar repositorio e submodulos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Compilar base e quatro candidatos
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=build-switch/test37
+          mkdir -p "$OUT/base" "$OUT/novos" "$OUT/logs"
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          INCLUDES=(-I src -I "$DEVKITPRO/libnx/include")
+          for d in src/gen recomp variants/jp/config snesrecomp/runner/src snesrecomp/runner/src/desktop snesrecomp/runner/include "$DEVKITPRO/portlibs/switch/include" "$DEVKITPRO/portlibs/switch/include/SDL2"; do
+            if test -d "$d"; then INCLUDES+=("-I$d"); fi
+          done
+          base_sources=(
+            src/mmx_cpu_infra.c
+            src/mmx_rtl.c
+            snesrecomp/runner/src/common_cpu_infra.c
+            snesrecomp/runner/src/cpu_state.c
+            snesrecomp/runner/src/common_rtl.c
+            snesrecomp/runner/src/snes/snes.c
+            snesrecomp/runner/src/snes/ppu.c
+            snesrecomp/runner/src/snes/dma.c
+            snesrecomp/runner/src/snes/cart.c
+            snesrecomp/runner/src/cpu_trace.c
+            snesrecomp/runner/src/snes/apu.c
+            snesrecomp/runner/src/snes/cpu.c
+            snesrecomp/runner/src/snes/joypad.c
+            snesrecomp/runner/src/snes/dsp1.c
+            snesrecomp/runner/src/snes/dsp1_hle.c
+            snesrecomp/runner/src/snes/dsp.c
+            snesrecomp/runner/src/snes/dsp_shadow.c
+            snesrecomp/runner/src/snes/spc.c
+            src/mmx_spc_player.c
+            snesrecomp/runner/src/audio_trace.c
+            snesrecomp/runner/src/snes/audio_shadow.c
+            src/mmx_boss_rush_audio.c
+            snesrecomp/runner/src/mod_audio.c
+            src/mmx_boss_rush.c
+            src/mmx_coop.c
+            src/mmx_weapons.c
+            src/mmx_knc_bugfix.c
+          )
+          new_sources=(
+            src/mmx_coop_view.c
+            src/mmx_zero.c
+            src/mmx_weapon_combat.c
+            src/mmx_wide_policy.c
+          )
+          printf 'grupo,fonte,resultado\n' > "$OUT/compilacao.csv"
+          compile_group() {
+            local group="$1"; shift
+            local n=0
+            for source in "$@"; do
+              n=$((n+1))
+              local target="$OUT/$group/$(printf '%02d' "$n")_$(basename "$source" .c).o"
+              local log="$OUT/logs/${group}_${n}.log"
+              if [[ ! -f "$source" ]]; then
+                echo "$group,$source,NAO_ENCONTRADO" >> "$OUT/compilacao.csv"
+                continue
+              fi
+              if "$CC" -std=gnu11 -O0 -Wall -fPIE "${INCLUDES[@]}" -c "$source" -o "$target" > "$log" 2>&1; then
+                echo "$group,$source,OK" >> "$OUT/compilacao.csv"
+              else
+                echo "$group,$source,FALHOU" >> "$OUT/compilacao.csv"
+                rm -f "$target"
+              fi
+            done
+          }
+          compile_group base "${base_sources[@]}"
+          compile_group novos "${new_sources[@]}"
+          mapfile -t base_objs < <(find "$OUT/base" -maxdepth 1 -name '*.o' | sort)
+          mapfile -t new_objs < <(find "$OUT/novos" -maxdepth 1 -name '*.o' | sort)
+          if [[ "${#base_objs[@]}" -ne 27 ]]; then
+            echo "ERRO: base incompleta (${#base_objs[@]}/27)" | tee "$OUT/erro.txt"
+            exit 1
+          fi
+          "$CC" -r "${base_objs[@]}" -o "$OUT/base-combinado.o" > "$OUT/base-link.log" 2>&1
+          if [[ "${#new_objs[@]}" -gt 0 ]]; then
+            "$CC" -r "${base_objs[@]}" "${new_objs[@]}" -o "$OUT/ampliado-combinado.o" > "$OUT/ampliado-link.log" 2>&1
+          else
+            echo "Nenhum modulo novo compilou" > "$OUT/erro.txt"
+            exit 1
+          fi
+
+      - name: Comparar simbolos antes e depois
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, re, csv
+          out = Path('build-switch/test37')
+          out.mkdir(parents=True, exist_ok=True)
+          nm = '/opt/devkitpro/devkitA64/bin/aarch64-none-elf-nm'
+          def symbols(obj):
+              if not obj.exists(): return None
+              p = subprocess.run([nm, '-g', str(obj)], capture_output=True, text=True)
+              if p.returncode: return None
+              defined, undefined = set(), set()
+              for line in p.stdout.splitlines():
+                  m = re.match(r'^\s*(?:[0-9a-fA-F]+\s+)?([A-Za-z])\s+(\S+)$', line)
+                  if not m: continue
+                  typ, sym = m.groups()
+                  if typ.upper() == 'U': undefined.add(sym)
+                  elif typ.upper() not in ('N',): defined.add(sym)
+              return undefined - defined, defined
+          before = symbols(out/'base-combinado.o')
+          after = symbols(out/'ampliado-combinado.o')
+          if before is None or after is None:
+              (out/'resumo.txt').write_text('Nao foi possivel comparar: verifique compilacao.csv e os logs de vinculacao.\n')
+              raise SystemExit(0)
+          old, _ = before
+          now, defs = after
+          resolved = sorted(old - now)
+          introduced = sorted(now - old)
+          remaining = sorted(now)
+          for name, seq in [('resolvidos.txt', resolved), ('novos-indefinidos.txt', introduced), ('restantes.txt', remaining)]:
+              (out/name).write_text('\n'.join(seq)+'\n' if seq else '')
+          with (out/'simbolos-definidos-novos.txt').open('w') as f:
+              for s in sorted(defs - before[1]): f.write(s+'\n')
+          new_ok = sum(1 for p in (out/'novos').glob('*.o'))
+          lines = [
+              'TESTE 37 - QUATRO MODULOS',
+              f'Modulos da base: 27',
+              f'Novos modulos compilados: {new_ok}/4',
+              f'Indefinidos antes: {len(old)}',
+              f'Antigos resolvidos: {len(resolved)}',
+              f'Novos indefinidos: {len(introduced)}',
+              f'Indefinidos depois: {len(remaining)}',
+              'OBS: vinculacao parcial (-r), ainda nao e um NRO executavel.'
+          ]
+          (out/'resumo.txt').write_text('\n'.join(lines)+'\n')
+          print('\n'.join(lines))
+          PY
+
+      - name: Enviar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste37-Relatorios
+          path: build-switch/test37/
+          if-no-files-found: warn
