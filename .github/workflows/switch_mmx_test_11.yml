@@ -1,4 +1,3 @@
-
 name: Switch - Mega Man X Teste 11
 
 on:
@@ -37,9 +36,7 @@ jobs:
       - name: Teste 15 - Verificar suporte a ucontext
         run: |
           echo "Verificando ucontext.h no devkitPro..."
-
           printf '#include <ucontext.h>\nint main(void) { return 0; }\n' > /tmp/test_ucontext.c
-
           if "$DEVKITA64/bin/aarch64-none-elf-gcc" \
             -c /tmp/test_ucontext.c \
             -o /tmp/test_ucontext.o; then
@@ -49,12 +46,10 @@ jobs:
             echo "Precisaremos de outra implementacao de fibers."
           fi
 
-       - name: Teste 16 - Verificar suporte a pthread
-         run: |
+      - name: Teste 16 - Verificar suporte a pthread
+        run: |
           echo "Verificando pthread.h no devkitPro..."
-
           printf '#include <pthread.h>\nint main(void) { pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER; return pthread_mutex_destroy(&m); }\n' > /tmp/test_pthread.c
-
           if "$DEVKITA64/bin/aarch64-none-elf-gcc" \
             -std=gnu11 \
             -c /tmp/test_pthread.c \
@@ -63,12 +58,11 @@ jobs:
           else
             echo "RESULTADO: pthread.h indisponivel."
           fi
-          
+
       - name: Compilar programa para Switch
         run: |
           set -eu
           mkdir -p build-switch
-
           "$DEVKITA64/bin/aarch64-none-elf-gcc" \
             -std=gnu11 \
             -O2 \
@@ -87,7 +81,6 @@ jobs:
           "$DEVKITPRO/tools/bin/elf2nro" \
             build-switch/mmx-test11.elf \
             build-switch/mmx-test11.nro
-
           ls -lh build-switch/mmx-test11.nro
 
       - name: Disponibilizar NRO
