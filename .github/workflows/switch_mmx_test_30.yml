@@ -1,0 +1,213 @@
+name: Switch - Mega Man X Teste 30
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile-core:
+    name: Mapear dependencias restantes do audio SNES
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+    steps:
+      - name: Baixar repositorio e submodulos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Compilar base e novos candidatos
+        shell: bash
+        run: |
+          set -uo pipefail
+          OUT=build-switch/test30
+          mkdir -p "$OUT/base" "$OUT/novos"
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          INCLUDES=(-I src -I "$DEVKITPRO/libnx/include")
+          for d in src/gen recomp variants/jp/config snesrecomp/runner/src snesrecomp/runner/src/desktop snesrecomp/runner/include "$DEVKITPRO/portlibs/switch/include" "$DEVKITPRO/portlibs/switch/include/SDL2"; do
+            if test -d "$d"; then INCLUDES+=("-I$d"); fi
+          done
+          base=(
+            src/mmx_cpu_infra.c
+            src/mmx_rtl.c
+            snesrecomp/runner/src/common_cpu_infra.c
+            snesrecomp/runner/src/cpu_state.c
+            snesrecomp/runner/src/common_rtl.c
+            snesrecomp/runner/src/snes/snes.c
+            snesrecomp/runner/src/snes/ppu.c
+            snesrecomp/runner/src/snes/dma.c
+            snesrecomp/runner/src/snes/cart.c
+            snesrecomp/runner/src/cpu_trace.c
+            snesrecomp/runner/src/snes/apu.c
+            snesrecomp/runner/src/snes/cpu.c
+            snesrecomp/runner/src/snes/joypad.c
+          )
+          printf 'grupo,fonte,resultado,arquivo_objeto\n' > "$OUT/compilacao.csv"
+          for source in "${base[@]}"; do
+            name="$(basename "$source" .c)"
+            obj="$OUT/base/$name.o"
+            if "$CC" -std=gnu11 -O0 -Wall -fPIE "${INCLUDES[@]}" -c "$source" -o "$obj" > "$OUT/base/$name.log" 2>&1; then
+              printf 'base,%s,OK,%s\n' "$source" "$obj" >> "$OUT/compilacao.csv"
+            else
+              printf 'base,%s,FALHOU,%s\n' "$source" "$obj" >> "$OUT/compilacao.csv"
+              rm -f "$obj"
+              echo "FALHOU: $source"; head -35 "$OUT/base/$name.log"
+            fi
+          done
+          # Descoberta por nomes: cada candidato sera compilado separadamente.
+          find snesrecomp/runner/src src -type f \( -iname '*spc*.c' -o -iname '*dsp*.c' \) | sort -u > "$OUT/candidatos.txt"
+          printf 'Candidatos encontrados:\n'; cat "$OUT/candidatos.txt"
+          idx=0
+          while IFS= read -r source; do
+            case "$source" in
+            esac
+            idx=$((idx+1))
+            name="$(basename "$source" .c)"
+            label="${idx}_${name}"
+            obj="$OUT/novos/$label.o"
+            if "$CC" -std=gnu11 -O0 -Wall -fPIE "${INCLUDES[@]}" -c "$source" -o "$obj" > "$OUT/novos/$label.log" 2>&1; then
+              printf 'novo,%s,OK,%s\n' "$source" "$obj" >> "$OUT/compilacao.csv"
+            else
+              printf 'novo,%s,FALHOU,%s\n' "$source" "$obj" >> "$OUT/compilacao.csv"
+              rm -f "$obj"
+              echo "FALHOU: $source"; head -25 "$OUT/novos/$label.log"
+            fi
+          done < "$OUT/candidatos.txt"
+
+      - name: Comparar simbolos e testar vinculacao parcial
+        shell: bash
+        run: |
+          set -uo pipefail
+          OUT=build-switch/test30
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, re, csv
+          out=Path('build-switch/test30')
+          nm='/opt/devkitpro/devkitA64/bin/aarch64-none-elf-nm'
+          cc='/opt/devkitpro/devkitA64/bin/aarch64-none-elf-gcc'
+          base=sorted((out/'base').glob('*.o'))
+          new=sorted((out/'novos').glob('*.o'))
+          def symbols(objects):
+              defined=set(); undefined=set()
+              for obj in objects:
+                  p=subprocess.run([nm,'-g',str(obj)],capture_output=True,text=True)
+                  if p.returncode: continue
+                  for line in p.stdout.splitlines():
+                      m=re.match(r'^\s*(?:[0-9a-fA-F]+\s+)?([A-Za-z])\s+(\S+)$',line)
+                      if m:
+                          kind,sym=m.groups()
+                          if kind.upper()=='U': undefined.add(sym)
+                          elif kind.upper()!='N': defined.add(sym)
+              return defined,undefined-defined
+          bd,bu=symbols(base)
+          nd,nu=symbols(base+new)
+          for filename,items in [('resolvidos.txt',bu-nu),('novos-indefinidos.txt',nu-bu),('restantes.txt',nu)]:
+              (out/filename).write_text('\n'.join(sorted(items))+'\n')
+          with (out/'resumo.txt').open('w') as f:
+              f.write('TESTE 30 - DEPENDENCIAS DE AUDIO\n')
+              f.write(f'Base compilada: {len(base)}/13\n')
+              f.write(f'Novos candidatos compilados: {len(new)}\n')
+              f.write(f'Indefinidos na base: {len(bu)}\n')
+              f.write(f'Indefinidos apos adicionar candidatos: {len(nu)}\n')
+              f.write(f'Dependencias resolvidas: {len(bu-nu)}\n')
+              f.write(f'Novas dependencias: {len(nu-bu)}\n')
+              f.write('Contagem estatica: nao comprova executavel funcional.\n')
+          if len(base)==13 and len(new)>0:
+              for label,objects in [('base',base),('ampliado',base+new)]:
+                  p=subprocess.run([cc,'-r',*[str(x) for x in objects],'-o',str(out/f'{label}.o')],capture_output=True,text=True)
+                  (out/f'{label}.link.log').write_text(p.stdout+p.stderr)
+                  with (out/'resumo.txt').open('a') as f:
+                      f.write(f'Vinculacao parcial {label}: codigo {p.returncode}\n')
+          else:
+              with (out/'resumo.txt').open('a') as f:
+                  f.write('Vinculacao parcial nao tentada: base incompleta ou nenhum modulo SPC/DSP compilado.\n')
+          print((out/'resumo.txt').read_text())
+          PY
+
+      - name: Identificar dependencias do audio e candidatos de implementacao
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import subprocess, re, csv
+          out = Path('build-switch/test30')
+          nm = '/opt/devkitpro/devkitA64/bin/aarch64-none-elf-nm'
+          objs = sorted((out/'base').glob('*.o')) + sorted((out/'novos').glob('*.o'))
+          if not objs:
+              raise SystemExit('Nenhum objeto disponivel para analisar')
+          def read_symbols(obj):
+              p = subprocess.run([nm, '-g', str(obj)], capture_output=True, text=True)
+              if p.returncode:
+                  return set(), set()
+              defs, undefs = set(), set()
+              for line in p.stdout.splitlines():
+                  m = re.match(r'^\s*(?:[0-9a-fA-F]+\s+)?([A-Za-z])\s+(\S+)$', line)
+                  if not m: continue
+                  kind, symbol = m.groups()
+                  if kind.upper() == 'U': undefs.add(symbol)
+                  elif kind.upper() != 'N': defs.add(symbol)
+              return defs, undefs
+          defined = set()
+          per_object = {}
+          for obj in objs:
+              d, u = read_symbols(obj)
+              defined.update(d)
+              per_object[str(obj)] = u
+          unresolved = set().union(*per_object.values()) - defined
+          # Analisamos as referencias diretas dos objetos de audio, sem presumir
+          # que todos os simbolos restantes no jogo pertencem ao audio.
+          audio_names = ('apu', 'spc', 'dsp', 'audio')
+          audio_objects = [obj for obj in objs if any(x in obj.stem.lower() for x in audio_names)]
+          audio_refs = set().union(*(per_object[str(obj)] for obj in audio_objects)) if audio_objects else set()
+          audio_unresolved = sorted(audio_refs & unresolved)
+          audio_named = sorted(s for s in unresolved if any(x in s.lower() for x in audio_names + ('sound', 'music')))
+          targets = sorted(set(audio_unresolved) | set(audio_named))
+          (out/'audio-indefinidos-diretos.txt').write_text('\n'.join(audio_unresolved)+'\n')
+          (out/'audio-indefinidos-por-nome.txt').write_text('\n'.join(audio_named)+'\n')
+          (out/'audio-alvos-para-investigar.txt').write_text('\n'.join(targets)+'\n')
+          source_roots = [Path('src'), Path('snesrecomp/runner/src')]
+          sources = sorted(p for root in source_roots if root.exists() for p in root.rglob('*')
+                           if p.is_file() and p.suffix.lower() in ('.c','.cpp','.cc','.s','.h','.hpp')
+                           and p.stat().st_size < 2_000_000)
+          # Ocorrencia textual e apenas uma pista: nao garante definicao.
+          patterns = {sym: re.compile(r'(?<![A-Za-z0-9_])'+re.escape(sym)+r'(?![A-Za-z0-9_])') for sym in targets}
+          hits = {sym: [] for sym in targets}
+          for path in sources:
+              lines = path.read_text(errors='replace').splitlines()
+              for i, line in enumerate(lines, 1):
+                  for sym, pat in patterns.items():
+                      if pat.search(line) and len(hits[sym]) < 25:
+                          hits[sym].append((str(path), i, line.strip()[:150]))
+          with (out/'mapa-audio.csv').open('w', newline='') as f:
+              writer = csv.writer(f)
+              writer.writerow(['simbolo','arquivo_candidato','linha','trecho'])
+              for sym in targets:
+                  if not hits[sym]: writer.writerow([sym,'NAO LOCALIZADO','',''])
+                  for path, line, snippet in hits[sym]: writer.writerow([sym,path,line,snippet])
+          with (out/'resumo-audio.txt').open('w') as f:
+              f.write('TESTE 30 - DIAGNOSTICO DE AUDIO\n')
+              f.write(f'Objetos de audio analisados: {len(audio_objects)}\n')
+              for obj in audio_objects: f.write(f'  {obj}\n')
+              f.write(f'Simbolos indefinidos em todo o conjunto: {len(unresolved)}\n')
+              f.write(f'Indefinidos diretamente referenciados por objetos de audio: {len(audio_unresolved)}\n')
+              f.write(f'Indefinidos com nome associado a audio: {len(audio_named)}\n')
+              f.write(f'Simbolos unicos investigados: {len(targets)}\n')
+              f.write(f'Arquivos fonte e cabecalhos examinados: {len(sources)}\n')
+              f.write('Busca textual nao comprova onde um simbolo e definido.\n')
+              f.write('Ainda nao ha teste de reproducao de audio nem NRO.\n')
+          print((out/'resumo-audio.txt').read_text())
+          PYCODE
+
+      - name: Disponibilizar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste30-Relatorios
+          path: build-switch/test30/
+          if-no-files-found: warn
