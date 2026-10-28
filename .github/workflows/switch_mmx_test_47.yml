@@ -1,0 +1,141 @@
+name: Switch - Mega Man X Teste 47
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  localizar-handlers-e-dispatch:
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Investigar 61 simbolos e fontes geradas
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=build-switch/test47
+          mkdir -p "$OUT"
+          cat > "$OUT/simbolos-alvo.txt" <<'SYMBOLS'
+          IrqHandler
+          MmxBossRushAfterFrame
+          MmxBossRushFilterInput
+          MmxBossRushFrame
+          MmxBossRushHighScore
+          MmxCoopTraceFrameBegin
+          MmxCoopTraceFrameEnd
+          MmxCoopTraceMark
+          MmxCoopTraceRecord
+          MmxCoopTraceStateLoaded
+          MmxDisplay_ExpandStageScroll
+          MmxSaberEnabled
+          MmxSaberWaveRuntimeGetCollisionRecord
+          NmiHandler
+          ResetHandler
+          RtlApuLock
+          RtlApuUnlock
+          WsShadowLayerActive
+          WsShadowOnVramWrite
+          WsShadowPresentWorldY
+          WsShadowScrollY
+          WsShadowTile
+          WsShadowWorldX
+          debug_on_block_enter
+          debug_on_wram_write_byte
+          debug_on_wram_write_word
+          g_config
+          g_dispatch_table
+          g_dispatch_table_count
+          g_framedump_callback
+          g_mmx_coop_trace
+          g_ram_routine_guard_count
+          g_ram_routine_guards
+          g_spc_player
+          g_ws_active
+          g_ws_extra
+          host_report_breadcrumb
+          msu1_enabled
+          msu1_init
+          msu1_mix
+          msu1_read
+          msu1_write
+          ppu_draw_whole_line_legacy
+          ppudma_frame_snapshot
+          ppudma_note_interrupt
+          ppudma_record_dma
+          recomp_read_internal_reg
+          recomp_write_internal_reg
+          sha256_compute
+          snes_mod_runtime_effective_set_c
+          snes_netplay_active
+          snes_netplay_note_slow_operation
+          snes_program_module_active
+          snes_program_module_find
+          snes_runahead_active
+          snes_snapshot_guard_finish
+          snes_snapshot_guard_identity_valid
+          snes_snapshot_guard_open
+          snesrecomp_abspath
+          snesrecomp_exe_dir_path
+          snesrecomp_execution_mode
+          SYMBOLS
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, csv
+          out=Path('build-switch/test47')
+          symbols=(out/'simbolos-alvo.txt').read_text().splitlines()
+          extensions={'.c','.h','.cpp','.hpp','.cc','.S','.s','.inc','.py','.cmake','.txt','.yml','.yaml'}
+          excluded={'.git','build','build-switch','node_modules','.github'}
+          files=[p for p in Path('.').rglob('*') if p.is_file() and p.suffix in extensions and not any(part in excluded for part in p.parts)]
+          contents={}
+          for p in files:
+              try: contents[p]=p.read_text(errors='replace')
+              except OSError: pass
+          with (out/'ocorrencias.csv').open('w',newline='') as f:
+              writer=csv.writer(f)
+              writer.writerow(['simbolo','arquivo','linha','trecho','tipo_estimado'])
+              for sym in symbols:
+                  pattern=re.compile(r'(?<![A-Za-z0-9_])'+re.escape(sym)+r'(?![A-Za-z0-9_])')
+                  for p,txt in contents.items():
+                      for num,line in enumerate(txt.splitlines(),1):
+                          if pattern.search(line):
+                              stripped=line.strip()
+                              typ=('possivel_definicao' if
+                                   re.search(r'\b'+re.escape(sym)+r'\s*\([^;]*\)\s*\{',stripped)
+                                   or re.search(r'\b'+re.escape(sym)+r'\s*(?:\[.*\])?\s*=',stripped)
+                                   else 'referencia_ou_declaracao')
+                              writer.writerow([sym,str(p),num,stripped[:240],typ])
+          focus=['ResetHandler','NmiHandler','IrqHandler','g_dispatch_table','g_dispatch_table_count','g_config','g_ram_routine_guards','g_ram_routine_guard_count']
+          lines=['TESTE 47 - INVESTIGACAO DE HANDLERS E DISPATCH','Simbolos do link final: '+str(len(symbols)),'Arquivos analisados: '+str(len(contents))]
+          for sym in focus:
+              pat=re.compile(r'(?<!\w)'+re.escape(sym)+r'(?!\w)')
+              matches=[str(p) for p,t in contents.items() if pat.search(t)]
+              lines.append(sym+': '+(', '.join(matches[:18]) if matches else 'SEM OCORRENCIA')+(' ...' if len(matches)>18 else ''))
+          lines+=['Ocorrencias textuais NAO comprovam definicoes vinculaveis.','Consulte ocorrencias.csv e candidatos.csv.']
+          (out/'resumo.txt').write_text('\n'.join(lines)+'\n')
+          candidates=['src/gen','recomp','variants','snesrecomp/runner/src','src']
+          with (out/'candidatos.csv').open('w',newline='') as f:
+              w=csv.writer(f); w.writerow(['arquivo','simbolos_alvo_mencionados'])
+              for p,t in contents.items():
+                  if p.suffix not in {'.c','.cpp','.S','.s'}: continue
+                  found=[s for s in symbols if re.search(r'(?<!\w)'+re.escape(s)+r'(?!\w)',t)]
+                  if found: w.writerow([str(p),' | '.join(found)])
+          print('\n'.join(lines))
+          PY
+
+      - name: Enviar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste47-Relatorios
+          path: build-switch/test47/
+          if-no-files-found: warn
