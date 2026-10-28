@@ -90,3 +90,87 @@ jobs:
           name: MegaManX-Switch-Teste17
           path: build-switch/mmx-test17.nro
           if-no-files-found: error
+
+      - name: Criar codigo do Teste 18
+        run: |
+          cat > build-switch/thread_test18.c <<'C_EOF'
+          #include <switch.h>
+          #include <pthread.h>
+          #include <stdio.h>
+
+          static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+          static pthread_cond_t condition = PTHREAD_COND_INITIALIZER;
+          static int phase = 0;
+          static int answer = 0;
+
+          static void *worker18(void *unused) {
+              (void)unused;
+              pthread_mutex_lock(&lock);
+              phase = 1;
+              pthread_cond_signal(&condition);
+              while (phase != 2)
+                  pthread_cond_wait(&condition, &lock);
+              answer = 42;
+              phase = 3;
+              pthread_cond_signal(&condition);
+              pthread_mutex_unlock(&lock);
+              return NULL;
+          }
+
+          int main(void) {
+              consoleInit(NULL);
+              padConfigureInput(1, HidNpadStyleSet_NpadStandard);
+              PadState pad;
+              padInitializeDefault(&pad);
+              printf("MEGA MAN X - TESTE 18\n\n");
+              pthread_t thread;
+              int created = pthread_create(&thread, NULL, worker18, NULL);
+              if (created != 0) {
+                  printf("pthread_create: ERRO %d\n", created);
+              } else {
+                  pthread_mutex_lock(&lock);
+                  while (phase != 1)
+                      pthread_cond_wait(&condition, &lock);
+                  printf("Worker pronto: OK\n");
+                  phase = 2;
+                  pthread_cond_signal(&condition);
+                  while (phase != 3)
+                      pthread_cond_wait(&condition, &lock);
+                  printf("Sinal de retorno: OK\n");
+                  printf("Resultado: %d\n", answer);
+                  pthread_mutex_unlock(&lock);
+                  int joined = pthread_join(thread, NULL);
+                  printf("pthread_join: %s\n", joined == 0 ? "OK" : "ERRO");
+                  printf("Mutex + cond: %s\n", answer == 42 && joined == 0 ? "OK" : "ERRO");
+              }
+              printf("\nPressione + para sair.\n");
+              while (appletMainLoop()) {
+                  padUpdate(&pad);
+                  if (padGetButtonsDown(&pad) & HidNpadButton_Plus) break;
+                  consoleUpdate(NULL);
+              }
+              consoleExit(NULL);
+              return 0;
+          }
+          C_EOF
+
+      - name: Compilar NRO do Teste 18
+        run: |
+          set -eu
+          "$DEVKITA64/bin/aarch64-none-elf-gcc" \
+            -std=gnu11 -O2 -Wall -fPIE \
+            -I"$DEVKITPRO/libnx/include" \
+            -specs="$DEVKITPRO/libnx/switch.specs" \
+            -o build-switch/mmx-test18.elf \
+            build-switch/thread_test18.c \
+            -L"$DEVKITPRO/libnx/lib" -lnx
+          "$DEVKITPRO/tools/bin/elf2nro" \
+            build-switch/mmx-test18.elf \
+            build-switch/mmx-test18.nro
+
+      - name: Disponibilizar NRO do Teste 18
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste18
+          path: build-switch/mmx-test18.nro
+          if-no-files-found: error
