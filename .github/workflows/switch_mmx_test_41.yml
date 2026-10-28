@@ -1,0 +1,173 @@
+name: Switch - Mega Man X Teste 41
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostico-link-final:
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+    steps:
+      - name: Checkout com submodulos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Recompilar os 39 modulos
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=build-switch/test41
+          mkdir -p "$OUT/objetos" "$OUT/logs"
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          INCLUDES=(-I src -I "$DEVKITPRO/libnx/include")
+          for d in src/gen recomp variants/jp/config snesrecomp/runner/src snesrecomp/runner/src/desktop snesrecomp/runner/include "$DEVKITPRO/portlibs/switch/include" "$DEVKITPRO/portlibs/switch/include/SDL2"; do
+            if test -d "$d"; then INCLUDES+=("-I$d"); fi
+          done
+          sources=(
+            src/mmx_cpu_infra.c
+            src/mmx_rtl.c
+            snesrecomp/runner/src/common_cpu_infra.c
+            snesrecomp/runner/src/cpu_state.c
+            snesrecomp/runner/src/common_rtl.c
+            snesrecomp/runner/src/snes/snes.c
+            snesrecomp/runner/src/snes/ppu.c
+            snesrecomp/runner/src/snes/dma.c
+            snesrecomp/runner/src/snes/cart.c
+            snesrecomp/runner/src/cpu_trace.c
+            snesrecomp/runner/src/snes/apu.c
+            snesrecomp/runner/src/snes/cpu.c
+            snesrecomp/runner/src/snes/joypad.c
+            snesrecomp/runner/src/snes/dsp1.c
+            snesrecomp/runner/src/snes/dsp1_hle.c
+            snesrecomp/runner/src/snes/dsp.c
+            snesrecomp/runner/src/snes/dsp_shadow.c
+            snesrecomp/runner/src/snes/spc.c
+            src/mmx_spc_player.c
+            snesrecomp/runner/src/audio_trace.c
+            snesrecomp/runner/src/snes/audio_shadow.c
+            src/mmx_boss_rush_audio.c
+            snesrecomp/runner/src/mod_audio.c
+            src/mmx_boss_rush.c
+            src/mmx_coop.c
+            src/mmx_weapons.c
+            src/mmx_knc_bugfix.c
+            src/mmx_coop_view.c
+            src/mmx_zero.c
+            src/mmx_weapon_combat.c
+            src/mmx_wide_policy.c
+            snesrecomp/runner/src/snes/interp_bridge.c
+            snesrecomp/runner/src/snes/sdd1.c
+            src/mmx_replay.c
+            src/mmx_renderer.c
+            snesrecomp/runner/src/snes/tier2_capture.c
+            src/mmx_render_assets.c
+            snesrecomp/runner/src/diagnostics/replay_writer.c
+            snesrecomp/runner/src/snes/interp816.c
+          )
+          printf 'fonte,resultado\n' > "$OUT/compilacao.csv"
+          n=0
+          for src in "${sources[@]}"; do
+            n=$((n+1))
+            obj="$OUT/objetos/$(printf '%02d' "$n")_$(basename "$src" .c).o"
+            if "$CC" -std=gnu11 -O0 -Wall -fPIE "${INCLUDES[@]}" -c "$src" -o "$obj" > "$OUT/logs/$(printf '%02d' "$n").log" 2>&1; then
+              echo "$src,OK" >> "$OUT/compilacao.csv"
+            else
+              echo "$src,FALHOU" >> "$OUT/compilacao.csv"
+              echo "Falha compilando $src" >&2
+              exit 1
+            fi
+          done
+          mapfile -t objs < <(find "$OUT/objetos" -name '*.o' | sort)
+          test "${#objs[@]}" -eq 39
+          "$CC" -r "${objs[@]}" -o "$OUT/combinado.o" > "$OUT/link-parcial.log" 2>&1
+
+      - name: Classificar dependencias por bibliotecas
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, re, csv
+          root=Path('build-switch/test41')
+          obj=root/'combinado.o'
+          if not obj.exists():
+              (root/'resumo.txt').write_text('Objeto combinado nao foi gerado; verifique logs.\n')
+              raise SystemExit(0)
+          tool='/opt/devkitpro/devkitA64/bin/aarch64-none-elf-nm'
+          def run(*args):
+              p=subprocess.run(args, capture_output=True, text=True, errors='replace')
+              return p.stdout if p.returncode==0 else ''
+          def parse(s):
+              defined=set(); undefined=set()
+              for line in s.splitlines():
+                  m=re.match(r'^\s*(?:[0-9a-fA-F]+\s+)?([A-Za-z])\s+(\S+)$',line)
+                  if not m: continue
+                  t,name=m.groups()
+                  if t.upper()=='U': undefined.add(name)
+                  elif t.upper() not in ('N',): defined.add(name)
+              return defined,undefined
+          defined,undef=parse(run(tool,'-g',str(obj)))
+          missing=sorted(undef-defined)
+          archives=[]
+          for folder in [Path('/opt/devkitpro/libnx/lib'),Path('/opt/devkitpro/portlibs/switch/lib'),Path('/opt/devkitpro/devkitA64/aarch64-none-elf/lib')]:
+              if folder.is_dir(): archives+=sorted(folder.rglob('*.a'))
+          archives=list(dict.fromkeys(archives))
+          hits={s:[] for s in missing}
+          scanned=0
+          for lib in archives:
+              # nm -g --defined-only on archive; lines may contain member labels.
+              p=subprocess.run([tool,'-g','--defined-only',str(lib)],capture_output=True,text=True,errors='replace')
+              if p.returncode: continue
+              scanned+=1
+              symbols=set()
+              for line in p.stdout.splitlines():
+                  m=re.match(r'^\s*(?:[0-9a-fA-F]+\s+)?([A-Za-z])\s+(\S+)$',line)
+                  if m and m.group(1).upper() not in ('U','N'): symbols.add(m.group(2))
+              for s in symbols.intersection(hits):
+                  hits[s].append(str(lib))
+          with (root/'classificacao.csv').open('w',newline='') as f:
+              w=csv.writer(f); w.writerow(['simbolo','categoria','bibliotecas_candidatas'])
+              for s in missing:
+                  libs=hits[s]
+                  if libs:
+                      cat='ENCONTRADO_EM_BIBLIOTECA'
+                  elif s.startswith('SDL_'):
+                      cat='SDL_SEM_DEFINICAO_LOCALIZADA'
+                  elif s.startswith(('Mmx','Snes','snes_','interp','tier2_','Rtl','g_')):
+                      cat='PROJETO_OU_ADAPTACAO'
+                  else:
+                      cat='OUTRO_OU_RUNTIME'
+                  w.writerow([s,cat,' | '.join(libs)])
+          (root/'restantes.txt').write_text('\n'.join(missing)+'\n')
+          unresolved=[s for s in missing if not hits[s]]
+          (root/'sem-biblioteca-encontrada.txt').write_text('\n'.join(unresolved)+'\n')
+          lines=[
+              'TESTE 41 - DIAGNOSTICO DE VINCULACAO',
+              f'Objetos compilados: 39',
+              f'Simbolos indefinidos: {len(missing)}',
+              f'Arquivos .a analisados: {scanned}',
+              f'Simbolos com definicao em ao menos uma biblioteca: {sum(bool(hits[s]) for s in missing)}',
+              f'Simbolos sem definicao nas bibliotecas examinadas: {len(unresolved)}',
+              'Encontrar simbolo em .a NAO garante compatibilidade de link.',
+              'Classificacao por prefixo e heuristica; verificar arquivo classificacao.csv.',
+              'Ainda nao foi gerado NRO.'
+          ]
+          (root/'resumo.txt').write_text('\n'.join(lines)+'\n')
+          print('\n'.join(lines))
+          PY
+
+      - name: Enviar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste41-Relatorios
+          path: build-switch/test41/
+          if-no-files-found: warn
