@@ -1,0 +1,101 @@
+name: Switch - Mega Man X Teste 32
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audio-dependencies:
+    name: Investigar funcoes de audio pendentes
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    steps:
+      - name: Baixar repositorio e submodulos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Localizar implementacoes e dependencias de audio
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=build-switch/test32
+          mkdir -p "$OUT"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, csv
+          root = Path('.')
+          out = Path('build-switch/test32')
+          targets = [
+              'RtlApuLock', 'RtlApuUnlock', 'g_spc_player',
+              'snes_mod_audio_play_voice', 'MmxBossRushGetState',
+              'MmxBossRushOwner'
+          ]
+          exts = {'.c', '.h', '.cc', '.cpp', '.cxx', '.S', '.s'}
+          skip = {'.git', 'build-switch', 'build', 'node_modules'}
+          files = sorted(p for p in root.rglob('*') if p.is_file()
+                         and p.suffix in exts and not any(x in skip for x in p.parts)
+                         and p.stat().st_size < 3_000_000)
+          matches = []
+          dynamic = set(targets)
+          for p in files:
+              try: data = p.read_text(encoding='utf-8', errors='replace')
+              except OSError: continue
+              for line in data.splitlines():
+                  dynamic.update(re.findall(r'\bsnes_mod_audio_[A-Za-z0-9_]+\b', line))
+          for p in files:
+              try: lines = p.read_text(encoding='utf-8', errors='replace').splitlines()
+              except OSError: continue
+              for n, line in enumerate(lines, 1):
+                  for symbol in sorted(dynamic):
+                      if re.search(r'(?<!\w)' + re.escape(symbol) + r'(?!\w)', line):
+                          stripped = line.strip()
+                          kind = 'referencia/indeterminado'
+                          if stripped.startswith(('extern ', '#define ', '//', '/*', '*')):
+                              kind = 'declaracao/macro/comentario'
+                          elif re.search(r'\b' + re.escape(symbol) + r'\s*\(', stripped):
+                              kind = 'chamada/ou-definicao'
+                          elif re.search(r'\b' + re.escape(symbol) + r'\s*(?:=|;|\[)', stripped):
+                              kind = 'variavel/ou-declaracao'
+                          matches.append((symbol, str(p), n, kind, stripped[:220]))
+          with (out/'ocorrencias.csv').open('w', newline='', encoding='utf-8') as f:
+              w=csv.writer(f); w.writerow(['simbolo','arquivo','linha','tipo_aproximado','trecho']); w.writerows(matches)
+          with (out/'resumo.txt').open('w', encoding='utf-8') as f:
+              f.write('TESTE 32 - DIAGNOSTICO DE AUDIO\n')
+              f.write(f'Arquivos examinados: {len(files)}\n')
+              f.write(f'Simbolos investigados: {len(dynamic)}\n')
+              f.write(f'Ocorrencias: {len(matches)}\n\n')
+              f.write('ATENCAO: ocorrencias textuais nao comprovam definicoes nem compatibilidade.\n')
+              f.write('Verifique ocorrencias.csv para identificar o arquivo real.\n\n')
+              for sym in sorted(dynamic):
+                  paths = sorted({r[1] for r in matches if r[0] == sym})
+                  f.write(f'{sym}: {", ".join(paths) if paths else "NAO LOCALIZADO"}\n')
+          print((out/'resumo.txt').read_text()[:14000])
+          PY
+
+      - name: Examinar caminhos e configuracoes de audio
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=build-switch/test32
+          {
+            echo '=== Arquivos relacionados a mod_audio, APU e SPC ==='
+            find src snesrecomp -type f \( -iname '*mod*audio*' -o -iname '*apu*' -o -iname '*spc*' -o -iname '*audio*' \) | sort | head -200
+            echo '=== Definicoes e uso em arquivos de build ==='
+            grep -RnE 'mod_audio|RtlApuLock|RtlApuUnlock|g_spc_player' \
+              --include='CMakeLists.txt' --include='*.cmake' --include='Makefile' \
+              src snesrecomp .github 2>/dev/null | head -120 || true
+            echo '=== Ferramentas ARM64 disponiveis ==='
+            ls /opt/devkitpro/devkitA64/bin/aarch64-none-elf-{gcc,nm} 2>/dev/null || true
+          } > "$OUT/arquivos-e-build.txt"
+
+      - name: Publicar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste32-Relatorios
+          path: build-switch/test32/
+          if-no-files-found: warn
