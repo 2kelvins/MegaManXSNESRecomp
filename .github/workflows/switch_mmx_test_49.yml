@@ -1,0 +1,149 @@
+name: Switch - Mega Man X Teste 49
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostico-codigo-gerado:
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Inspecionar geracao de handlers e dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=build-switch/test49
+          mkdir -p "$OUT"
+          cat > "$OUT/pendentes.txt" <<'SYMBOLS'
+          IrqHandler
+          MmxBossRushAfterFrame
+          MmxBossRushFilterInput
+          MmxBossRushFrame
+          MmxBossRushHighScore
+          MmxDisplay_ExpandStageScroll
+          MmxSaberEnabled
+          MmxSaberWaveRuntimeGetCollisionRecord
+          NmiHandler
+          ResetHandler
+          RtlApuLock
+          RtlApuUnlock
+          debug_on_block_enter
+          debug_on_wram_write_byte
+          debug_on_wram_write_word
+          g_config
+          g_dispatch_table
+          g_dispatch_table_count
+          g_framedump_callback
+          g_ram_routine_guard_count
+          g_ram_routine_guards
+          g_spc_player
+          g_ws_active
+          g_ws_extra
+          host_report_breadcrumb
+          ppu_draw_whole_line_legacy
+          ppudma_frame_snapshot
+          ppudma_note_interrupt
+          ppudma_record_dma
+          recomp_read_internal_reg
+          recomp_write_internal_reg
+          sha256_compute
+          snes_mod_runtime_effective_set_c
+          snes_netplay_active
+          snes_netplay_note_slow_operation
+          snes_program_module_active
+          snes_program_module_find
+          snes_runahead_active
+          snes_snapshot_guard_finish
+          snes_snapshot_guard_identity_valid
+          snes_snapshot_guard_open
+          snesrecomp_abspath
+          snesrecomp_exe_dir_path
+          snesrecomp_execution_mode
+          SYMBOLS
+          python3 - <<'PY'
+          from pathlib import Path
+          import re,csv,subprocess
+          out=Path('build-switch/test49')
+          symbols=(out/'pendentes.txt').read_text().splitlines()
+          focus=['ResetHandler','NmiHandler','IrqHandler','g_dispatch_table','g_dispatch_table_count','g_config','g_ram_routine_guards','g_ram_routine_guard_count']
+          excluded={'.git','build','build-switch','node_modules'}
+          suffixes={'.c','.h','.cpp','.hpp','.cc','.S','.s','.py','.json','.toml','.yml','.yaml','.mk'}
+          files=[]
+          for p in Path('.').rglob('*'):
+              if p.is_file() and p.suffix in suffixes and not excluded.intersection(p.parts):
+                  try: files.append((p,p.read_text(errors='replace')))
+                  except OSError: pass
+          def matches(sym):
+              pat=re.compile(r'(?<!\w)'+re.escape(sym)+r'(?!\w)')
+              return [(p,i,line.strip()) for p,t in files for i,line in enumerate(t.splitlines(),1) if pat.search(line)]
+          with (out/'ocorrencias-foco.csv').open('w',newline='') as f:
+              w=csv.writer(f);w.writerow(['simbolo','arquivo','linha','trecho'])
+              for s in focus:
+                  for p,i,line in matches(s):w.writerow([s,str(p),i,line[:400]])
+          with (out/'mapa-44.csv').open('w',newline='') as f:
+              w=csv.writer(f);w.writerow(['simbolo','quantidade_arquivos','arquivos'])
+              for s in symbols:
+                  paths=sorted({str(p) for p,_,_ in matches(s)})
+                  w.writerow([s,len(paths),' | '.join(paths[:30])])
+          # Locate generated C, object, ROM and dispatch artifacts without guessing their existence.
+          patterns=['*dispatch*','*recomp*','*funcs*','*config*','*.o','*.elf','*.nro','*.sfc','*.smc']
+          with (out/'artefatos-relevantes.txt').open('w') as f:
+              seen=set()
+              for pattern in patterns:
+                  for p in Path('.').rglob(pattern):
+                      if excluded.intersection(p.parts) or not p.is_file() or str(p) in seen:continue
+                      seen.add(str(p))
+                      f.write(str(p)+'\n')
+          # Search actual declarations/definitions via global symbols in prebuilt objects, if any.
+          nm='/opt/devkitpro/devkitA64/bin/aarch64-none-elf-nm'
+          with (out/'definicoes-objetos.csv').open('w',newline='') as f:
+              w=csv.writer(f);w.writerow(['simbolo','objeto','tipo'])
+              for p in Path('.').rglob('*.o'):
+                  if excluded.intersection(p.parts):continue
+                  result=subprocess.run([nm,'-g','--defined-only',str(p)],capture_output=True,text=True,errors='replace')
+                  for line in result.stdout.splitlines():
+                      m=re.match(r'^\s*(?:[0-9a-fA-F]+\s+)?([A-Za-z])\s+(\S+)$',line)
+                      if m and m.group(2) in symbols:w.writerow([m.group(2),str(p),m.group(1)])
+          # Show generator usage and conditions without running it (could need ROM / custom inputs).
+          keys=['program_emit.py','setup_host_dispatch.c','SNESRECOMP_SETUP_HOST','g_dispatch_table','ResetHandler']
+          with (out/'pistas-geracao.txt').open('w') as f:
+              for key in keys:
+                  f.write('\n=== '+key+' ===\n')
+                  pat=re.compile(re.escape(key))
+                  count=0
+                  for p,t in files:
+                      for i,line in enumerate(t.splitlines(),1):
+                          if pat.search(line):
+                              f.write(f'{p}:{i}: {line[:300]}\n')
+                              count+=1
+                              if count>=90:break
+                      if count>=90:break
+          lines=['TESTE 49 - DIAGNOSTICO DE CODIGO GERADO',
+                 'Simbolos do link final anterior: '+str(len(symbols)),
+                 'Arquivos texto examinados: '+str(len(files)),
+                 'Este teste NAO gera handlers nem executavel.',
+                 'Ocorrencias em codigo nao comprovam definicoes.',
+                 'Inspecionar pistas-geracao.txt, ocorrencias-foco.csv e mapa-44.csv.']
+          for s in focus:
+              paths={str(p) for p,_,_ in matches(s)}
+              lines.append(f'{s}: {len(paths)} arquivo(s) com referencias')
+          (out/'resumo.txt').write_text('\n'.join(lines)+'\n')
+          print('\n'.join(lines))
+          PY
+      - name: Enviar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste49-Relatorios
+          path: build-switch/test49/
+          if-no-files-found: warn
