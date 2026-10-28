@@ -1,0 +1,125 @@
+name: Switch - Mega Man X Teste 22
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-link:
+    name: Verificar inclusao real do motor MMX
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+    steps:
+      - name: Baixar repositorio e submodulos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Compilar os mesmos tres objetos do Teste 21
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=build-switch/test22
+          mkdir -p "$OUT"
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          INCLUDES=(-I src -I "$DEVKITPRO/libnx/include")
+          for dir in src/gen recomp variants/jp/config snesrecomp/runner/src snesrecomp/runner/src/desktop snesrecomp/runner/include; do
+            if test -d "$dir"; then INCLUDES+=("-I$dir"); fi
+          done
+          for module in mmx_cpu_infra mmx_rtl; do
+            "$CC" -std=gnu11 -O0 -Wall -fPIE "${INCLUDES[@]}" \
+              -c "src/$module.c" -o "$OUT/$module.o" \
+              > "$OUT/$module.compile.log" 2>&1
+            echo "$module: compilado"
+          done
+          "$CC" -std=gnu11 -O0 -Wall -fPIE \
+            -I "$DEVKITPRO/libnx/include" \
+            -c src/switch_main.c -o "$OUT/switch_main.o" \
+            > "$OUT/switch_main.compile.log" 2>&1
+
+      - name: Comparar vinculacao normal e forcada
+        shell: bash
+        run: |
+          set -uo pipefail
+          OUT=build-switch/test22
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          NM="$DEVKITA64/bin/aarch64-none-elf-nm"
+          READELF="$DEVKITA64/bin/aarch64-none-elf-readelf"
+          OBJDUMP="$DEVKITA64/bin/aarch64-none-elf-objdump"
+          OBJECTS=("$OUT/switch_main.o" "$OUT/mmx_cpu_infra.o" "$OUT/mmx_rtl.o")
+          LIBS=(-L"$DEVKITPRO/libnx/lib" -lnx)
+          COMMON=(-std=gnu11 -O0 -fPIE -specs="$DEVKITPRO/libnx/switch.specs")
+
+          "$NM" -g --defined-only "$OUT/mmx_cpu_infra.o" "$OUT/mmx_rtl.o" > "$OUT/objetos.simbolos-definidos.txt" 2>&1
+          "$NM" -u "$OUT/mmx_cpu_infra.o" "$OUT/mmx_rtl.o" > "$OUT/objetos.dependencias.txt" 2>&1
+
+          echo '1/2: vinculacao normal (igual ao Teste 21)'
+          "$CC" "${COMMON[@]}" \
+            -Wl,-Map,"$OUT/normal.map" \
+            -o "$OUT/normal.elf" "${OBJECTS[@]}" "${LIBS[@]}" \
+            > "$OUT/normal.link.log" 2>&1
+          normal_status=$?
+
+          if test "$normal_status" -eq 0; then
+            "$NM" -g --defined-only "$OUT/normal.elf" > "$OUT/normal.simbolos.txt" 2>&1
+            "$READELF" -SW "$OUT/normal.elf" > "$OUT/normal.secoes.txt" 2>&1
+            "$OBJDUMP" -h "$OUT/normal.elf" > "$OUT/normal.objdump-secoes.txt" 2>&1
+          fi
+
+          echo '2/2: vinculacao forcando entrada em funcoes reais do MMX'
+          # -u obriga o linker a considerar os simbolos como necessarios.
+          # Nao criamos funcoes falsas nem modificamos o codigo original.
+          "$CC" "${COMMON[@]}" \
+            -Wl,-u,RunOneFrameOfGame -Wl,-u,kMmxGameInfo \
+            -Wl,-Map,"$OUT/forcado.map" \
+            -o "$OUT/forcado.elf" "${OBJECTS[@]}" "${LIBS[@]}" \
+            > "$OUT/forcado.link.log" 2>&1
+          forcado_status=$?
+
+          if test "$forcado_status" -eq 0; then
+            "$NM" -g --defined-only "$OUT/forcado.elf" > "$OUT/forcado.simbolos.txt" 2>&1
+            "$READELF" -SW "$OUT/forcado.elf" > "$OUT/forcado.secoes.txt" 2>&1
+          fi
+
+          {
+            echo 'TESTE 22 - INCLUSAO REAL DOS MODULOS MMX'
+            echo 'Objetos: switch_main.o, mmx_cpu_infra.o, mmx_rtl.o'
+            echo "VINCULACAO NORMAL: codigo $normal_status"
+            echo "VINCULACAO FORCADA: codigo $forcado_status"
+            echo
+            echo 'Simbolos de interesse no ELF normal:'
+            if test -f "$OUT/normal.simbolos.txt"; then
+              grep -E ' (RunOneFrameOfGame|kMmxGameInfo|MmxSchedulerTick|MmxDrawPpuFrame)$' "$OUT/normal.simbolos.txt" || echo '(nenhum encontrado)'
+            else
+              echo '(ELF normal indisponivel)'
+            fi
+            echo
+            echo 'Simbolos de interesse no ELF forcado:'
+            if test -f "$OUT/forcado.simbolos.txt"; then
+              grep -E ' (RunOneFrameOfGame|kMmxGameInfo|MmxSchedulerTick|MmxDrawPpuFrame)$' "$OUT/forcado.simbolos.txt" || echo '(nenhum encontrado)'
+            else
+              echo '(ELF forcado indisponivel; consulte forcado.link.log)'
+            fi
+            echo
+            echo 'A vinculacao forcada pode falhar: isso revela dependencias reais.'
+            echo 'Nenhum NRO sera gerado neste teste.'
+          } | tee "$OUT/resumo.txt"
+
+          echo '--- Primeiras 90 linhas do log forcado ---'
+          head -90 "$OUT/forcado.link.log"
+          # Os erros de vinculacao sao dados do diagnostico, nao falhas do workflow.
+          exit 0
+
+      - name: Disponibilizar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste22-Relatorios
+          path: build-switch/test22/
+          if-no-files-found: warn
