@@ -1,0 +1,159 @@
+name: Switch - Mega Man X Teste 36
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mapear-dependencias:
+    name: Localizar implementacoes para os simbolos restantes
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+    steps:
+      - name: Baixar repositorio e submodulos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Compilar os 27 modulos ja aprovados
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=build-switch/test36
+          mkdir -p "$OUT/objetos" "$OUT/logs"
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          INCLUDES=(-I src -I "$DEVKITPRO/libnx/include")
+          for d in src/gen recomp variants/jp/config snesrecomp/runner/src snesrecomp/runner/src/desktop snesrecomp/runner/include "$DEVKITPRO/portlibs/switch/include" "$DEVKITPRO/portlibs/switch/include/SDL2"; do
+            if test -d "$d"; then INCLUDES+=("-I$d"); fi
+          done
+          sources=(
+            src/mmx_cpu_infra.c
+            src/mmx_rtl.c
+            snesrecomp/runner/src/common_cpu_infra.c
+            snesrecomp/runner/src/cpu_state.c
+            snesrecomp/runner/src/common_rtl.c
+            snesrecomp/runner/src/snes/snes.c
+            snesrecomp/runner/src/snes/ppu.c
+            snesrecomp/runner/src/snes/dma.c
+            snesrecomp/runner/src/snes/cart.c
+            snesrecomp/runner/src/cpu_trace.c
+            snesrecomp/runner/src/snes/apu.c
+            snesrecomp/runner/src/snes/cpu.c
+            snesrecomp/runner/src/snes/joypad.c
+            snesrecomp/runner/src/snes/dsp1.c
+            snesrecomp/runner/src/snes/dsp1_hle.c
+            snesrecomp/runner/src/snes/dsp.c
+            snesrecomp/runner/src/snes/dsp_shadow.c
+            snesrecomp/runner/src/snes/spc.c
+            src/mmx_spc_player.c
+            snesrecomp/runner/src/audio_trace.c
+            snesrecomp/runner/src/snes/audio_shadow.c
+            src/mmx_boss_rush_audio.c
+            snesrecomp/runner/src/mod_audio.c
+            src/mmx_boss_rush.c
+            src/mmx_coop.c
+            src/mmx_weapons.c
+            src/mmx_knc_bugfix.c
+          )
+          printf 'fonte,resultado\n' > "$OUT/compilacao.csv"
+          n=0
+          for source in "${sources[@]}"; do
+            n=$((n+1))
+            target="$OUT/objetos/$(printf '%02d' "$n")_$(basename "$source" .c).o"
+            if test ! -f "$source"; then
+              printf '%s,NAO_ENCONTRADO\n' "$source" >> "$OUT/compilacao.csv"
+              continue
+            fi
+            if "$CC" -std=gnu11 -O0 -Wall -fPIE "${INCLUDES[@]}" -c "$source" -o "$target" > "$OUT/logs/$n.log" 2>&1; then
+              printf '%s,OK\n' "$source" >> "$OUT/compilacao.csv"
+            else
+              printf '%s,FALHOU\n' "$source" >> "$OUT/compilacao.csv"
+              rm -f "$target"
+            fi
+          done
+
+      - name: Mapear simbolos indefinidos e arquivos candidatos
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, re, csv, collections
+          out = Path('build-switch/test36')
+          objs = sorted((out/'objetos').glob('*.o'))
+          nm = '/opt/devkitpro/devkitA64/bin/aarch64-none-elf-nm'
+          defined, undefined = set(), set()
+          for obj in objs:
+              result = subprocess.run([nm, '-g', str(obj)], text=True, capture_output=True, check=True)
+              for line in result.stdout.splitlines():
+                  m = re.match(r'^\s*(?:[0-9a-fA-F]+\s+)?([A-Za-z])\s+(\S+)$', line)
+                  if not m: continue
+                  typ, sym = m.groups()
+                  if typ.upper() == 'U': undefined.add(sym)
+                  elif typ.upper() != 'N': defined.add(sym)
+          remaining = sorted(undefined - defined)
+          (out/'restantes.txt').write_text('\n'.join(remaining)+'\n')
+          excluded = {'.git','build-switch','build','node_modules','third_party'}
+          roots = [Path('src'),Path('snesrecomp/runner/src')]
+          files = []
+          for root in roots:
+              if root.exists():
+                  files.extend(p for p in root.rglob('*') if p.is_file() and p.suffix in {'.c','.cc','.cpp','.cxx','.S','.s'} and not any(x in excluded for x in p.parts))
+          # Heuristica: definicao aparente de funcao ou variavel, nao apenas chamada/declaracao.
+          candidates = collections.defaultdict(list)
+          for path in files:
+              try: content = path.read_text(encoding='utf-8',errors='replace')
+              except OSError: continue
+              for sym in remaining:
+                  if not re.search(r'\b'+re.escape(sym)+r'\b',content): continue
+                  pat = re.compile(r'\b'+re.escape(sym)+r'\s*\([^;{}]*\)\s*\{',re.S)
+                  matches = list(pat.finditer(content))
+                  if matches:
+                      line = content.count('\n',0,matches[0].start())+1
+                      candidates[sym].append((str(path),line,'FUNCAO_POSSIVEL'))
+                  else:
+                      # Referencia textual; pode ser chamada, declaracao ou variavel.
+                      m = re.search(r'\b'+re.escape(sym)+r'\b',content)
+                      line = content.count('\n',0,m.start())+1
+                      candidates[sym].append((str(path),line,'REFERENCIA'))
+          with (out/'mapa-simbolos.csv').open('w',newline='') as f:
+              w=csv.writer(f); w.writerow(['simbolo','arquivo','linha','tipo'])
+              for sym in remaining:
+                  for path,line,kind in candidates[sym]: w.writerow([sym,path,line,kind])
+          scores=collections.Counter()
+          for sym, hits in candidates.items():
+              for path,line,kind in hits:
+                  if kind=='FUNCAO_POSSIVEL': scores[path]+=1
+          with (out/'ranking-arquivos.csv').open('w',newline='') as f:
+              w=csv.writer(f); w.writerow(['arquivo','funcoes_pendentes_possivelmente_definidas'])
+              for path,count in scores.most_common(): w.writerow([path,count])
+          focus = [s for s in remaining if any(k in s.lower() for k in ('coop','zero','renderer','trace','weapon','apu','spc'))]
+          (out/'foco-coop-render-audio.txt').write_text('\n'.join(f'{s}: '+', '.join(p for p,_,k in candidates[s] if k=='FUNCAO_POSSIVEL') for s in focus)+'\n')
+          summary = [
+              'TESTE 36 - DIAGNOSTICO DE DEPENDENCIAS',
+              f'Objetos compilados: {len(objs)}/27',
+              f'Simbolos indefinidos: {len(remaining)}',
+              f'Arquivos fonte examinados: {len(files)}',
+              f'Simbolos com possivel definicao: {sum(any(k=="FUNCAO_POSSIVEL" for _,_,k in candidates[s]) for s in remaining)}',
+              'IMPORTANTE: mapeamento textual heuristico; nao prova que cada funcao sera compilavel.',
+              'Ranking de arquivos e mapa detalhado nos CSVs.'
+          ]
+          (out/'resumo.txt').write_text('\n'.join(summary)+'\n')
+          print('\n'.join(summary))
+          print('TOP 12 CANDIDATOS:')
+          for path,count in scores.most_common(12): print(f'  {count:3} {path}')
+          PY
+
+      - name: Enviar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste36-Relatorios
+          path: build-switch/test36/
+          if-no-files-found: warn
