@@ -1,0 +1,91 @@
+name: Switch - Mega Man X Teste 50
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  investigar-gerador:
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.12-slim
+    steps:
+      - name: Checkout com submodulos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Investigar pipeline de geracao sem ROM
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=build-switch/test50
+          mkdir -p "$OUT"
+          python3 - <<'PY'
+          from pathlib import Path
+          import ast, csv, re, subprocess
+          out=Path('build-switch/test50')
+          roots=[Path('snesrecomp/recompiler/v2'),Path('snesrecomp/tools'),Path('snesrecomp/runner/src'),Path('recomp'),Path('src/gen'),Path('variants')]
+          scripts=[Path('snesrecomp/recompiler/v2/program_emit.py'),Path('snesrecomp/tools/v2_regen.py'),Path('snesrecomp/tools/sdk_generate.py')]
+          scripts=[p for p in scripts if p.exists()]
+          targets=['g_dispatch_table','g_dispatch_table_count','g_ram_routine_guards','ResetHandler','NmiHandler','IrqHandler','I_RESET','program_emit','v2_regen','sdk_generate']
+          with (out/'geradores-e-funcoes.txt').open('w') as f:
+              for p in scripts:
+                  f.write(f'\n=== {p} ===\n')
+                  src=p.read_text(errors='replace')
+                  try:
+                      tree=ast.parse(src)
+                      for node in ast.walk(tree):
+                          if isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef,ast.ClassDef)):
+                              f.write(f'{node.lineno}: {type(node).__name__} {node.name}\n')
+                      for node in ast.walk(tree):
+                          if isinstance(node,ast.If) and isinstance(node.test,ast.Compare):
+                              segment=ast.get_source_segment(src,node.test) or ''
+                              if '__name__' in segment: f.write(f'ENTRYPOINT line {node.lineno}: {segment}\n')
+                  except SyntaxError as exc:f.write(f'PARSE ERROR: {exc}\n')
+          paths=[Path('README.md'),Path('CMakeLists.txt'),Path('Makefile'),Path('.github/workflows/build.yml'),Path('snesrecomp/README.md')]
+          paths += [p for root in roots if root.exists() for p in root.rglob('*') if p.is_file() and p.suffix in {'.md','.toml','.json','.yml','.yaml','.cmake','.mk','.py','.txt'}]
+          paths=list(dict.fromkeys(paths))
+          with (out/'comandos-e-referencias.csv').open('w',newline='') as f:
+              w=csv.writer(f);w.writerow(['arquivo','linha','trecho'])
+              for p in paths:
+                  if not p.exists():continue
+                  try: lines=p.read_text(errors='replace').splitlines()
+                  except OSError:continue
+                  for i,line in enumerate(lines,1):
+                      if any(t.lower() in line.lower() for t in ['v2_regen','sdk_generate','program_emit','python -m','python3 ','--rom','--output','--config','recomp/','src/gen/','SNESRECOMP_SETUP_HOST']):
+                          w.writerow([str(p),i,line.strip()[:450]])
+          with (out/'alvos-geracao.csv').open('w',newline='') as f:
+              w=csv.writer(f);w.writerow(['arquivo','linha','simbolo','trecho'])
+              for p in scripts:
+                  for i,line in enumerate(p.read_text(errors='replace').splitlines(),1):
+                      for t in targets:
+                          if t in line:w.writerow([str(p),i,t,line.strip()[:350]])
+          with (out/'arquivos-de-entrada.txt').open('w') as f:
+              for root in [Path('recomp'),Path('src/gen'),Path('variants'),Path('config'),Path('symbols')]:
+                  f.write(f'\n=== {root} ===\n')
+                  if root.exists():
+                      items=sorted(p for p in root.rglob('*') if p.is_file())
+                      f.write(f'Quantidade: {len(items)}\n')
+                      for p in items[:250]:f.write(str(p)+'\n')
+                  else:f.write('DIRETORIO AUSENTE\n')
+          with (out/'ajuda-geradores.txt').open('w') as f:
+              for p in scripts:
+                  f.write(f'\n=== python {p} --help ===\n')
+                  try:
+                      r=subprocess.run(['python3',str(p),'--help'],capture_output=True,text=True,timeout=12)
+                      f.write(f'Exit code: {r.returncode}\n')
+                      f.write((r.stdout+r.stderr)[:10000]+'\n')
+                  except Exception as e:f.write(f'Nao executado: {e}\n')
+          summary=['TESTE 50 - PIPELINE DE GERACAO SEM ROM',f'Geradores examinados: {len(scripts)}',f'Arquivos de documentacao/config examinados: {len(paths)}','Nenhuma ROM foi baixada, gerada ou enviada.','Nenhum arquivo do repositorio foi alterado.','A opcao --help pode falhar por dependencias Python ausentes.','Consultar comandos-e-referencias.csv, alvos-geracao.csv e ajuda-geradores.txt.']
+          (out/'resumo.txt').write_text('\n'.join(summary)+'\n')
+          print('\n'.join(summary))
+          PY
+      - name: Enviar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste50-Relatorios
+          path: build-switch/test50/
+          if-no-files-found: warn
