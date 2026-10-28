@@ -1,0 +1,184 @@
+name: Switch - Mega Man X Teste 43
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  localizar-definicoes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Localizar implementacoes reais dos 105 simbolos
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-switch/test43
+          cat > build-switch/test43/simbolos.txt <<'EOF'
+          ConvertThreadToFiber
+          CreateFiber
+          DeleteFiber
+          GetLastError
+          IrqHandler
+          MmxBossRushAfterFrame
+          MmxBossRushDraw
+          MmxBossRushFilterInput
+          MmxBossRushFrame
+          MmxBossRushHighScore
+          MmxCoopTraceFrameBegin
+          MmxCoopTraceFrameEnd
+          MmxCoopTraceMark
+          MmxCoopTraceRecord
+          MmxCoopTraceStateLoaded
+          MmxDisplay_ExpandStageScroll
+          MmxSaberEnabled
+          MmxSaberWaveRuntimeGetCollisionRecord
+          NmiHandler
+          ResetHandler
+          RtlApuLock
+          RtlApuUnlock
+          SnesTraceWriterClose
+          SnesTraceWriterError
+          SnesTraceWriterOpen
+          SnesTraceWriterWrite
+          SwitchToFiber
+          WsShadowLayerActive
+          WsShadowOnVramWrite
+          WsShadowPresentWorldY
+          WsShadowScrollY
+          WsShadowTile
+          WsShadowWorldX
+          cx4_create
+          cx4_destroy
+          cx4_irq_pending
+          cx4_load_firmware
+          cx4_owns_bus
+          cx4_ram_ptr
+          cx4_read
+          cx4_read_vector_override
+          cx4_reset
+          cx4_saveload
+          cx4_saveload_clock
+          cx4_sync
+          cx4_write
+          debug_on_block_enter
+          debug_on_wram_write_byte
+          debug_on_wram_write_word
+          g_config
+          g_dispatch_table
+          g_dispatch_table_count
+          g_framedump_callback
+          g_mmx_coop_trace
+          g_ram_routine_guard_count
+          g_ram_routine_guards
+          g_spc_player
+          g_ws_active
+          g_ws_extra
+          host_report_breadcrumb
+          msu1_enabled
+          msu1_init
+          msu1_mix
+          msu1_read
+          msu1_write
+          ppu_draw_whole_line_legacy
+          ppudma_frame_snapshot
+          ppudma_note_interrupt
+          ppudma_record_dma
+          recomp_read_internal_reg
+          recomp_write_internal_reg
+          sa1_cpu_irq_pending
+          sa1_cpu_memory_ptr
+          sa1_cpu_read
+          sa1_cpu_write
+          sa1_create
+          sa1_destroy
+          sa1_reset
+          sa1_saveload
+          sa1_set_cpu_bus_address
+          sa1_sync
+          sha256_compute
+          snes_loadRom
+          snes_mod_runtime_effective_set_c
+          snes_netplay_active
+          snes_netplay_note_slow_operation
+          snes_program_module_active
+          snes_program_module_find
+          snes_runahead_active
+          snes_snapshot_guard_finish
+          snes_snapshot_guard_identity_valid
+          snes_snapshot_guard_open
+          snesrecomp_abspath
+          snesrecomp_exe_dir_path
+          snesrecomp_execution_mode
+          superfx_cpu_read_io
+          superfx_cpu_read_ram
+          superfx_cpu_read_rom
+          superfx_cpu_write_io
+          superfx_cpu_write_ram
+          superfx_create
+          superfx_destroy
+          superfx_reset
+          superfx_saveload
+          superfx_sync
+          EOF
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import re,csv,collections
+          root=Path('.')
+          out=Path('build-switch/test43')
+          symbols=(out/'simbolos.txt').read_text().splitlines()
+          excluded={'.git','build-switch','.github','node_modules','vendor'}
+          extensions={'.c','.h','.cpp','.cc','.cxx','.S','.s'}
+          candidates=[]
+          for p in root.rglob('*'):
+              if not p.is_file() or p.suffix not in extensions or any(part in excluded for part in p.parts): continue
+              try:
+                  if p.stat().st_size>2_000_000: continue
+                  data=p.read_text(encoding='utf-8',errors='replace')
+              except OSError: continue
+              candidates.append((str(p),data))
+          # Busca por token exato. Nao confundir declaracao/chamada com definicao.
+          rows=[]; counts=collections.Counter(); fiber=[]
+          for s in symbols:
+              pat=re.compile(r'(?<![A-Za-z0-9_])'+re.escape(s)+r'(?![A-Za-z0-9_])')
+              found=[]
+              for path,data in candidates:
+                  if not pat.search(data): continue
+                  matches=[]
+                  for i,line in enumerate(data.splitlines(),1):
+                      if pat.search(line):
+                          matches.append(f'{i}: {line.strip()[:210]}')
+                          if len(matches)>=5: break
+                  if matches: found.append((path,matches))
+              counts['com_ocorrencias' if found else 'sem_ocorrencias']+=1
+              if not found: rows.append([s,'NAO_ENCONTRADO','',''])
+              for path,lines in found:
+                  rows.append([s,'OCORRE_NO_CODIGO (nao necessariamente define)',path,' | '.join(lines)])
+                  if s in ('ConvertThreadToFiber','CreateFiber','DeleteFiber','SwitchToFiber','GetLastError'):
+                      fiber.append(f'### {s} | {path}\n'+'\n'.join(lines)+'\n')
+          with (out/'ocorrencias.csv').open('w',newline='') as f:
+              w=csv.writer(f);w.writerow(['simbolo','resultado','arquivo','trechos']);w.writerows(rows)
+          (out/'fibras.txt').write_text('\n'.join(fiber) or 'Nenhuma ocorrencia de fibras encontrada.')
+          (out/'resumo.txt').write_text('\n'.join([
+              'TESTE 43 - BUSCA DE DEFINICOES NO REPOSITORIO',
+              f'Simbolos investigados: {len(symbols)}',
+              f'Arquivos C/C++/headers examinados: {len(candidates)}',
+              f'Simbolos com ao menos uma ocorrencia: {counts["com_ocorrencias"]}',
+              f'Simbolos sem ocorrencias: {counts["sem_ocorrencias"]}',
+              'IMPORTANTE: ocorrencia em fonte nao prova definicao compilavel.',
+              'Fibras: consultar fibras.txt; pode haver implementacao exclusiva Windows.',
+              'Este teste nao compila nem gera NRO.'
+          ])+'\n')
+          print((out/'resumo.txt').read_text())
+          PYCODE
+      - name: Enviar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste43-Relatorios
+          path: build-switch/test43/
+          if-no-files-found: warn
