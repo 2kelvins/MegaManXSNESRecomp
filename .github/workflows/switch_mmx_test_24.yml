@@ -1,0 +1,136 @@
+name: Switch - Mega Man X Teste 24
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integrate-infra:
+    name: Compilar infraestrutura e medir dependencias
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+    steps:
+      - name: Baixar repositorio e submodulos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Compilar modulos e registrar erros sem interromper diagnostico
+        shell: bash
+        run: |
+          set -uo pipefail
+          OUT=build-switch/test24
+          mkdir -p "$OUT"
+          CC="$DEVKITA64/bin/aarch64-none-elf-gcc"
+          NM="$DEVKITA64/bin/aarch64-none-elf-nm"
+          INCLUDES=(-I src -I "$DEVKITPRO/libnx/include")
+          for dir in src/gen recomp variants/jp/config snesrecomp/runner/src snesrecomp/runner/src/desktop snesrecomp/runner/include; do
+            if test -d "$dir"; then INCLUDES+=("-I$dir"); fi
+          done
+          printf 'Modulo,Resultado\n' > "$OUT/compilacao.csv"
+          modules=(
+            src/mmx_cpu_infra.c
+            src/mmx_rtl.c
+            snesrecomp/runner/src/common_cpu_infra.c
+            snesrecomp/runner/src/cpu_state.c
+            snesrecomp/runner/src/common_rtl.c
+          )
+          for source in "${modules[@]}"; do
+            name="$(basename "$source" .c)"
+            obj="$OUT/$name.o"
+            log="$OUT/$name.compile.log"
+            if test ! -f "$source"; then
+              echo "AUSENTE: $source" | tee "$log"
+              printf '%s,AUSENTE\n' "$name" >> "$OUT/compilacao.csv"
+              continue
+            fi
+            if "$CC" -std=gnu11 -O0 -Wall -fPIE "${INCLUDES[@]}" -c "$source" -o "$obj" > "$log" 2>&1; then
+              echo "OK: $source"
+              printf '%s,OK\n' "$name" >> "$OUT/compilacao.csv"
+            else
+              echo "FALHOU: $source"
+              head -35 "$log"
+              printf '%s,FALHOU\n' "$name" >> "$OUT/compilacao.csv"
+              rm -f "$obj"
+            fi
+          done
+          for name in mmx_cpu_infra mmx_rtl common_cpu_infra cpu_state common_rtl; do
+            if test -f "$OUT/$name.o"; then
+              "$NM" -g "$OUT/$name.o" > "$OUT/$name.symbols.txt" 2>&1 || true
+            fi
+          done
+
+      - name: Comparar simbolos antes e depois
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > build-switch/test24/comparar.py <<'PY'
+          import pathlib
+          import re
+          from collections import Counter
+
+          out = pathlib.Path('build-switch/test24')
+          originals = ['mmx_cpu_infra', 'mmx_rtl']
+          added = ['common_cpu_infra', 'cpu_state', 'common_rtl']
+          def symbols(name):
+              file = out / (name + '.symbols.txt')
+              defined, undefined = set(), set()
+              if not file.exists():
+                  return defined, undefined
+              for line in file.read_text(errors='replace').splitlines():
+                  match = re.match(r'^\s*(?:(?:[0-9a-fA-F]+)\s+)?([A-Za-z])\s+(\S+)\s*$', line)
+                  if match:
+                      kind, sym = match.groups()
+                      if kind == 'U':
+                          undefined.add(sym)
+                      elif kind.upper() in 'TDBRCSGWV':
+                          defined.add(sym)
+              return defined, undefined
+
+          base_def = set().union(*(symbols(n)[0] for n in originals))
+          base_undef = set().union(*(symbols(n)[1] for n in originals)) - base_def
+          successful_added = [n for n in added if (out / (n + '.symbols.txt')).exists()]
+          all_names = originals + successful_added
+          all_def = set().union(*(symbols(n)[0] for n in all_names))
+          all_undef = set().union(*(symbols(n)[1] for n in all_names)) - all_def
+          resolved = sorted(base_undef - all_undef)
+          introduced = sorted(all_undef - base_undef)
+          counts = Counter(s for n in all_names for s in symbols(n)[0])
+          duplicates = sorted(s for s, count in counts.items() if count > 1)
+          (out / 'resolvidos.txt').write_text('\n'.join(resolved) + '\n')
+          (out / 'novos-indefinidos.txt').write_text('\n'.join(introduced) + '\n')
+          (out / 'restantes.txt').write_text('\n'.join(sorted(all_undef)) + '\n')
+          (out / 'definicoes-duplicadas.txt').write_text('\n'.join(duplicates) + '\n')
+          summary = (
+              'TESTE 24 - INTEGRACAO DA INFRAESTRUTURA\n'
+              'Este teste compila objetos, nao cria NRO nem executa o jogo.\n'
+              'Contagens de simbolos globais; referencias da biblioteca C tambem entram.\n\n'
+              f'Modulos adicionais compilados: {", ".join(successful_added) or "nenhum"}\n'
+              f'Indefinidos antes (dois modulos originais): {len(base_undef)}\n'
+              f'Indefinidos apos incluir os modulos compilados: {len(all_undef)}\n'
+              f'Indefinidos originais resolvidos: {len(resolved)}\n'
+              f'Novos indefinidos introduzidos: {len(introduced)}\n'
+              f'Simbolos globais com multiplas definicoes: {len(duplicates)}\n\n'
+              'ATENCAO: reducao de simbolos nao garante vinculacao ou funcionamento.\n'
+              'Leia os logs individuais para falhas e avisos.\n'
+          )
+          (out / 'resumo.txt').write_text(summary)
+          print(summary)
+          print('Resolvidos (ate 35):', ', '.join(resolved[:35]))
+          print('Duplicados (ate 35):', ', '.join(duplicates[:35]))
+          PY
+          python3 build-switch/test24/comparar.py
+
+      - name: Disponibilizar relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaManX-Switch-Teste24-Relatorios
+          path: build-switch/test24/
+          if-no-files-found: warn
